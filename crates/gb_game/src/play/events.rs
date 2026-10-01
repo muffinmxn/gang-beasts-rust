@@ -74,6 +74,28 @@ struct Wheel {
     max_speed: f32,
 }
 
+/// Pooled physics props (`CoreNet.Pooling.PoolSpawner` + `Pool`/`SyncPool`, 0x488FD0): Chute's meat paste, Incinerator's
+/// boxes and barrels, Trucks' sign holders. The scene ships each pool as inactive `(Clone)` bodies; they are parked
+/// at load and, every `DelayMin..DelayMax` seconds, one free item is dropped at the spawner (+ `RandomSpawnOffset`).
+struct PropSpawner {
+    entity: Entity,
+    items: Vec<PropItem>,
+    delay_min: f32,
+    delay_max: f32,
+    offset: Vec3,
+    since: f32,
+    next: f32,
+}
+
+struct PropItem {
+    entity: Entity,
+    /// Every rigid body under the pooled root with its authored pose, and the root's authored position.
+    bodies: Vec<(usize, Iso)>,
+    root_pos: Vec3,
+    live: bool,
+    age: f32,
+}
+
 /// `OnTriggerStayApplyForce` (0x751570): a door/shutter body is pushed every step with `openForce` while the
 /// door is open and `closeForce` otherwise (VelocityChange; Linear -> AddForce, Torque -> AddTorque). A beast
 /// inside the trigger opens it after `_waitOpenTime`; leaving closes it after `_waitClosedTime`.
@@ -98,6 +120,8 @@ struct Floater {
     body: usize,
     force: f32,
     falloff: f32,
+    /// Authored (rest) height: the scene is saved with every floating body already at its waterline.
+    rest_y: f32,
 }
 
 /// `Road` (0x7487E0): a kinematic road tile that MoveTowards(end) at `speed` and wraps to `start`.
@@ -137,6 +161,7 @@ pub struct StageEvents {
     spinners: Vec<(Entity, Vec3)>,
     floaters: Vec<Floater>,
     doors: Vec<Door>,
+    props: Vec<PropSpawner>,
     /// `Liquid` surface heights (Unity y) of the stage.
     water_level: Option<f32>,
     rng: u32,
@@ -237,6 +262,61 @@ pub fn stage_events(
         w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
         sim.world.move_kinematic(w.body, w.pose);
     }
+    // Falling props.
+    {
+        let mut spawns: Vec<(usize, usize)> = Vec::new();
+        for (si, sp) in state.props.iter_mut().enumerate() {
+            sp.since += dt;
+            for item in &mut sp.items {
+                if item.live {
+                    item.age += dt;
+                }
+            }
+            if sp.since >= sp.next {
+                if let Some(ii) = sp.items.iter().position(|i| !i.live) {
+                    spawns.push((si, ii));
+                }
+            }
+        }
+        for (si, ii) in spawns {
+            let r = [state.rand01(), state.rand01(), state.rand01(), state.rand01(), state.rand01(), state.rand01()];
+            let sp = &mut state.props[si];
+            let Ok(g) = globals.get(sp.entity) else { continue };
+            let off = Vec3::new((r[0] * 2.0 - 1.0) * sp.offset.x, r[1] * sp.offset.y, (r[2] * 2.0 - 1.0) * sp.offset.z);
+            let pos = mirror_position(g.translation()) + off;
+            let rot = Quat::from_euler(EulerRot::YXZ, r[3] * 6.283, r[4] * 6.283, r[5] * 6.283);
+            let item = &mut sp.items[ii];
+            let _ = rot;
+            for (body, rest) in &item.bodies {
+                sim.world.restore_body(*body);
+                sim.world.teleport(*body, Iso::new(pos + (rest.position - item.root_pos), rest.rotation));
+            }
+            item.live = true;
+            item.age = 0.0;
+            if let Ok(mut v) = visibility.get_mut(item.entity) {
+                *v = Visibility::Visible;
+            }
+            let (min, max) = (sp.delay_min, sp.delay_max);
+            let nr = r[3];
+            sp.since = 0.0;
+            sp.next = min + (max - min).max(0.0) * nr;
+        }
+        for sp in &mut state.props {
+            for item in &mut sp.items {
+                let lowest = item.bodies.iter().map(|(b, _)| sim.world.pose(*b).position.y).fold(f32::MAX, f32::min);
+                if item.live && (item.age > 25.0 || lowest < -60.0) {
+                    for (body, _) in &item.bodies {
+                        sim.world.set_linear_velocity(*body, Vec3::ZERO);
+                        sim.world.remove_body(*body);
+                    }
+                    item.live = false;
+                    if let Ok(mut v) = visibility.get_mut(item.entity) {
+                        *v = Visibility::Hidden;
+                    }
+                }
+            }
+        }
+    }
     // Doors and shutters.
     if !state.doors.is_empty() {
         let step_scale = (dt / fixed.timestep().as_secs_f32()).max(0.0);
@@ -269,12 +349,17 @@ pub fn stage_events(
     if let Some(level) = state.water_level {
         let step_scale = dt / fixed.timestep().as_secs_f32();
         for f in &state.floaters {
-            let y = sim.world.pose(f.body).position.y;
-            let depth = level - y;
-            if depth > 0.0 {
-                let a = (f.force * 2.0 * (depth / f.falloff.max(0.1))).min(60.0);
-                sim.world.add_force(f.body, Vec3::Y * a * step_scale, 5);
-            }
+            // The source law (acceleration = force*2*depth/falloff below the surface) settles each body some
+            // distance under its authored height (pivot vs collider bounds are not the same point), so buoys,
+            // ice and the Trawler hull sat too low. Use the same stiffness as a spring about the authored rest
+            // height: a = g + k * (rest - y) - c * vy, which holds the saved pose and still bobs when pushed.
+            let pose_y = sim.world.pose(f.body).position.y;
+            let vy = sim.world.linear_velocity(f.body).y;
+            let k = f.force * 2.0 / f.falloff.max(0.1);
+            let g = 20.0;
+            let _ = level;
+            let a = (g + k * (f.rest_y - pose_y) - 2.0 * k.sqrt() * 0.6 * vy).clamp(0.0, 80.0);
+            sim.world.add_force(f.body, Vec3::Y * a * step_scale, 5);
         }
     }
     // RotateOverTime: Transform.Rotate(speed * dt, Space.Self), e.g. the background 'City Pivot'.
@@ -603,6 +688,10 @@ fn init(
                     }
                 }
             }
+            // Cable segments of the frozen platforms: left dynamic they tear apart against the held ends.
+            if script_of(node, "Gondola_Cable").is_some() || script_of(node, "RopeBreak").is_some() {
+                freeze(sim, i);
+            }
             if node.path.ends_with("gondola_base") || node.path.ends_with("containerFrameLower") || node.path.ends_with("containerFrameUpper") {
                 freeze(sim, i);
             }
@@ -628,6 +717,76 @@ fn init(
         }
         if held > 0 {
             info!("stage events: {held} bendable bone(s) held against gravity");
+        }
+    }
+    // Park every pooled (Clone) body (the scene saves them in the world), then register prop spawners.
+    {
+        let inst = sim.scenes[0].0;
+        let mut parked = 0;
+        for (i, node) in nodes.iter().enumerate() {
+            // Any body at or below a pooled "(Clone)" root (Chute's meat keeps its body on a child bone).
+            let pooled = node.path.split('/').any(|n| n.contains("(Clone)"));
+            if pooled {
+                if let Some(&body) = sim.world.instances[inst].bodies.get(&i) {
+                    sim.world.remove_body(body);
+                    parked += 1;
+                }
+            }
+        }
+        let poses_all = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
+        for (i, node) in nodes.iter().enumerate() {
+            let Some(spawner) = script_of(node, "PoolSpawner") else { continue };
+            let pool = script_of(node, "Pool").or_else(|| script_of(node, "SyncPool"));
+            let (Some(pool), Some(&entity)) = (pool, map.0.get(&(0, i))) else { continue };
+            let mut items = Vec::new();
+            let mut is_train = false;
+            for p in pool["_Pool"].as_array().into_iter().flatten() {
+                let Some(n) = p["node"].as_u64().map(|n| n as usize) else { continue };
+                if script_of(&nodes[n], "Train").is_some() {
+                    is_train = true;
+                }
+                let mut bodies = Vec::new();
+                for (j, d) in nodes.iter().enumerate() {
+                    let mut cur = Some(j);
+                    let mut under = false;
+                    while let Some(c) = cur {
+                        if c == n {
+                            under = true;
+                            break;
+                        }
+                        cur = nodes[c].parent;
+                    }
+                    if under {
+                        if let Some(&b) = sim.world.instances[inst].bodies.get(&j) {
+                            let _ = d;
+                            bodies.push((b, sim.world.pose(b)));
+                        }
+                    }
+                }
+                if let (false, Some(&e)) = (bodies.is_empty(), map.0.get(&(0, n))) {
+                    items.push(PropItem { entity: e, bodies, root_pos: poses_all[n].position, live: false, age: 0.0 });
+                }
+            }
+            if is_train || items.is_empty() {
+                continue;
+            }
+            let (delay_min, delay_max) = (
+                spawner["DelayMin"].as_f64().unwrap_or(3.0) as f32,
+                spawner["DelayMax"].as_f64().unwrap_or(8.0) as f32,
+            );
+            let r = state.rand01();
+            state.props.push(PropSpawner {
+                entity,
+                items,
+                delay_min,
+                delay_max,
+                offset: vec3(&spawner["RandomSpawnOffset"]),
+                since: 0.0,
+                next: delay_min + (delay_max - delay_min).max(0.0) * r,
+            });
+        }
+        if parked > 0 || !state.props.is_empty() {
+            info!("stage events: parked {parked} pooled bodies, {} prop spawner(s)", state.props.len());
         }
     }
     for node in nodes.iter() {
@@ -670,6 +829,7 @@ fn init(
                         body,
                         force: d["force"].as_f64().unwrap_or(1.0) as f32,
                         falloff: d["forceFalloff"].as_f64().unwrap_or(0.5) as f32,
+                        rest_y: sim.world.pose(body).position.y,
                     });
                 }
             }
