@@ -74,6 +74,19 @@ struct Wheel {
     max_speed: f32,
 }
 
+/// `FanController` + `PushVolume` (Vents' turbine): the fan cycles off (`FanDisabledTime`) -> wind-up -> spin
+/// (`FanSpinTime`); while it spins everything inside its push volume is thrown upward.
+struct Fan {
+    trigger: Entity,
+    center: Vec3,
+    half: Vec3,
+    thrust: f32,
+    spin: f32,
+    windup: f32,
+    off: f32,
+    clock: f32,
+}
+
 /// `Elevators_Car` (simplified): the car shuttles between its `floors` (metres above the first one), pausing at
 /// each, as a kinematic body. The malfunction / cable-snap / fall sequence of `Elevators_Logic` is not ported.
 struct Lift {
@@ -191,6 +204,7 @@ pub struct StageEvents {
     props: Vec<PropSpawner>,
     track: Option<Track>,
     lifts: Vec<Lift>,
+    fans: Vec<Fan>,
     /// `Liquid` surface heights (Unity y) of the stage.
     water_level: Option<f32>,
     rng: u32,
@@ -291,6 +305,26 @@ pub fn stage_events(
         w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
         sim.world.move_kinematic(w.body, w.pose);
     }
+    // Fans.
+    for f in &mut state.fans {
+        f.clock = (f.clock + dt) % (f.off + f.windup + f.spin);
+        let power = if f.clock < f.off {
+            0.0
+        } else if f.clock < f.off + f.windup {
+            (f.clock - f.off) / f.windup.max(0.01)
+        } else {
+            1.0
+        };
+        if power > 0.2 {
+            if let Ok(g) = globals.get(f.trigger) {
+                for (b, p) in &points {
+                    if inside(g, f.center, f.half, mirror_position(*p)) {
+                        sim.world.add_force(*b, Vec3::Y * (20.0 * f.thrust * 1.6 * power) * (dt / fixed.timestep().as_secs_f32()), 5);
+                    }
+                }
+            }
+        }
+    }
     // Elevator cars.
     for l in &mut state.lifts {
         if l.floors.len() < 2 {
@@ -383,7 +417,7 @@ pub fn stage_events(
         }
         for sp in &mut state.props {
             for item in &mut sp.items {
-                if item.live && std::env::var_os("GB_PROP_DEBUG").is_some() && (item.age - 6.0).abs() < dt {
+                if item.live && std::env::var_os("GB_PROP_DEBUG").is_some() && item.age > 6.0 && item.age < 6.1 {
                     let p = sim.world.pose(item.bodies[0].0).position;
                     info!("prop after 6s at {p:?}");
                 }
@@ -820,6 +854,25 @@ fn init(
         if held > 0 {
             info!("stage events: {held} bendable bone(s) held against gravity");
         }
+    }
+    for node in nodes.iter() {
+        if let Some(d) = script_of(node, "FanController") {
+            let Some(vol) = d["_beastEffectorVolume"]["node"].as_u64().map(|n| n as usize) else { continue };
+            let (Some((center, half)), Some(&trigger)) = (collider_box(&nodes[vol]), map.0.get(&(0, vol))) else { continue };
+            state.fans.push(Fan {
+                trigger,
+                center,
+                half,
+                thrust: d["_beastVolumeThrustMagnitude"].as_f64().unwrap_or(0.7) as f32,
+                spin: d["FanSpinTime"].as_f64().unwrap_or(16.0) as f32,
+                windup: d["FanWindupTime"].as_f64().unwrap_or(2.0) as f32,
+                off: d["FanDisabledTime"].as_f64().unwrap_or(20.0) as f32,
+                clock: 0.0,
+            });
+        }
+    }
+    if !state.fans.is_empty() {
+        info!("stage events: {} fan(s)", state.fans.len());
     }
     // Elevator cars become kinematic shuttles.
     for node in nodes.iter() {
