@@ -377,6 +377,7 @@ fn run() -> Result<(), String> {
             mips::generate_tangents,
             mips::vinyl_roughness,
             attach_stage_lightmaps,
+            attach_vinyl_lightmaps,
             material_debug,
             auto_screenshot,
             manual_screenshot,
@@ -663,7 +664,18 @@ fn setup(
         };
         lightmaps.insert(
             assignment.node,
-            (image, assignment.scale_offset, stage.lightmap_exposures.get(assignment.index).copied().unwrap_or(1.0)),
+            // Aquarium/Menu were calibrated at 1.0. Other stages' atlases (now decoded as RGBM like the Aquarium's) read
+            // ~4x too bright at the same constant, so scale them down (matches Grind; Subway/Vents stop blowing out).
+            (
+                image,
+                assignment.scale_offset,
+                stage.lightmap_exposures.get(assignment.index).copied().unwrap_or(1.0)
+                    * if stage.name == "menu" || stage.name == "aquarium" {
+                        1.0
+                    } else {
+                        std::env::var("GB_LIGHTMAP_STAGE_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.25)
+                    },
+            ),
         );
     }
     println!(
@@ -1092,6 +1104,76 @@ fn attach_stage_lightmaps(
                     offset_x + scale_x,
                     1.0 - offset_y,
                 ),
+                bicubic_sampling: false,
+            });
+            checked.insert(entity);
+        }
+    }
+}
+
+/// Same as [`attach_stage_lightmaps`] for surfaces already swapped to the VinylOrMetal extended material
+/// (they no longer hold a `StandardMaterial` handle, so the baked GI never reached them).
+fn attach_vinyl_lightmaps(
+    mut commands: Commands,
+    stage: Res<StageLightmaps>,
+    roots: Query<&SceneInstance, With<play::PhysicsScene>>,
+    spawner: Res<SceneSpawner>,
+    meshes: Res<Assets<Mesh>>,
+    mut vinyl: ResMut<Assets<vinyl::VinylMaterial>>,
+    entities: Query<(
+        Option<&GltfExtras>,
+        Option<&ChildOf>,
+        Option<&Mesh3d>,
+        Option<&Lightmap>,
+        Option<&MeshMaterial3d<vinyl::VinylMaterial>>,
+    )>,
+    mut checked: Local<HashSet<Entity>>,
+) {
+    if stage.0.is_empty() || std::env::var_os("GB_NO_LIGHTMAPS").is_some() {
+        return;
+    }
+    for instance in &roots {
+        for entity in spawner.iter_instance_entities(**instance) {
+            if checked.contains(&entity) {
+                continue;
+            }
+            let Ok((_, _, Some(mesh_handle), existing, Some(material_handle))) = entities.get(entity) else {
+                continue;
+            };
+            if existing.is_some() {
+                checked.insert(entity);
+                continue;
+            }
+            let Some(mesh) = meshes.get(&mesh_handle.0) else { continue };
+            if mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none() || mesh.attribute(Mesh::ATTRIBUTE_UV_1).is_none() {
+                checked.insert(entity);
+                continue;
+            }
+            let Some(material) = vinyl.get_mut(&material_handle.0) else { continue };
+            let mut ancestor = Some(entity);
+            let mut node_index = None;
+            for _ in 0..16 {
+                let Some(current) = ancestor else { break };
+                let Ok((extras, child_of, _, _, _)) = entities.get(current) else { break };
+                if let Some(extras) = extras {
+                    if let Ok(value) = serde_json::from_str::<Value>(&extras.value) {
+                        if let Some(index) = value["gb_node"].as_u64() {
+                            node_index = Some(index as usize);
+                            break;
+                        }
+                    }
+                }
+                ancestor = child_of.map(ChildOf::parent);
+            }
+            let Some((image, scale_offset, exposure)) = node_index.and_then(|index| stage.0.get(&index)) else {
+                checked.insert(entity);
+                continue;
+            };
+            material.base.lightmap_exposure = *exposure * UNITY_TO_BEVY_LUMINANCE * lightmap_exposure_scale();
+            let [scale_x, scale_y, offset_x, offset_y] = *scale_offset;
+            commands.entity(entity).insert(Lightmap {
+                image: image.clone(),
+                uv_rect: Rect::new(offset_x, 1.0 - (offset_y + scale_y), offset_x + scale_x, 1.0 - offset_y),
                 bicubic_sampling: false,
             });
             checked.insert(entity);

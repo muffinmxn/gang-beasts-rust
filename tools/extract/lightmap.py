@@ -1,4 +1,5 @@
 """Convert Unity's encoded static lightmaps for Bevy's linear RGB lightmap sampler."""
+import os
 import numpy as np
 from PIL import Image
 
@@ -10,7 +11,9 @@ def unity_lightmap_encoding(texture_format, color_space):
     the project's shader color-space keyword still needs source validation;
     texture format alone is not a universal lightmap-encoding discriminator.
     """
-    if int(texture_format) == 25:  # BC7: static lightmaps use RGBM, not full HDR.
+    # Desktop static lightmaps are RGBM whatever the container: BC7 (25), DXT5 (12) or uncompressed RGBA32 (4) with the
+    # multiplier in alpha. Treating RGBA32 as 'double LDR' ignored alpha and produced near-white garbage atlases.
+    if int(texture_format) in (25, 12, 4) and not os.environ.get("GB_LEGACY_DLDR"):
         if int(color_space) == 1:  # Unity ColorSpace.Linear
             return {"kind": "rgbm", "exposure": 34.493242, "exponent": 2.2}
         return {"kind": "rgbm", "exposure": 5.0, "exponent": 1.0}

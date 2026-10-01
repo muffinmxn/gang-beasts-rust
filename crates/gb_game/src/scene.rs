@@ -351,6 +351,12 @@ impl SceneData {
                     _ => return None,
                 };
                 let data = &component.data;
+                // LightmapBakeType: Realtime 4, Baked 2, Mixed 1. A Baked light exists only inside the lightmaps.
+                if data["m_Lightmapping"].as_u64() == Some(2)
+                    && std::env::var_os("GB_KEEP_BAKED_LIGHTS").is_none()
+                {
+                    return None;
+                }
                 let color = &data["m_Color"];
                 let channel = |name: &str| color[name].as_f64().map(|v| v as f32);
                 Some(SceneLight {
