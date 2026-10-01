@@ -769,7 +769,14 @@ fn setup(
         // retain the authored local falloff range and color.
         // Unity's serialized indoor-light values were calibrated against the local Aquarium
         // lights at 500 lumens per source intensity. The 6,000 multiplier blew out this gallery.
-        let intensity = light.intensity * 500.0;
+        let scale = std::env::var("GB_LOCAL_LIGHT_SCALE")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            // Physically derived from the calibrated sun (2,600 lux per Unity intensity): a point light of
+            // Unity intensity I has I * 2600 candela = I * 2600 * 4 pi lumens. Menu/Aquarium keep the
+            // older 500 because their baked lightmaps already contain these lights' contribution.
+            .unwrap_or(if stage.name == "menu" || stage.name == "aquarium" { 500.0 } else { 32_670.0 });
+        let intensity = light.intensity * scale;
         let shadows_enabled = light.casts_shadows;
         match light.kind {
             scene::SceneLightKind::Point | scene::SceneLightKind::Area => {

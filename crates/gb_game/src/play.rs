@@ -598,6 +598,7 @@ pub fn plugin(app: &mut App) {
                 spawn_roots,
                 map_nodes,
                 events::stage_events,
+                events::drift_report,
                 apply_player_colors,
                 sync_bodies,
                 crate::fracture::render,
@@ -1444,6 +1445,9 @@ fn sync_bodies(
     mut transforms: Query<&mut Transform>,
 ) {
     let alpha = fixed_time.overstep_fraction();
+    if std::env::var_os("GB_NO_BODY_SYNC").is_some() {
+        return;
+    }
     for (scene, (instance, src, root)) in sim.scenes.iter().enumerate() {
         let inst = &sim.world.instances[*instance];
         if inst.bodies.is_empty()

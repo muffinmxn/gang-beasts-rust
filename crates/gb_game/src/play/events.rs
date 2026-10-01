@@ -512,6 +512,25 @@ fn init(
             }
         }
     }
+    // Bendable rails / bridge frames (Bendable|VariableBreakJoint chains) are limit-only joints with no
+    // spring: with gravity they sagged 0.3 m at load. The authored scene holds them at rest, so keep gravity
+    // off for those bones; they still bend and break when beasts hit them. `GB_BEND_GRAVITY=1` restores it.
+    if std::env::var_os("GB_BEND_GRAVITY").is_none() {
+        let inst = sim.scenes[0].0;
+        let mut held = 0;
+        for (i, node) in nodes.iter().enumerate() {
+            if script_of(node, "BendableBreakJoint").is_some() || script_of(node, "VariableBreakJoint").is_some() {
+                if let Some(&body) = sim.world.instances[inst].bodies.get(&i) {
+                    sim.world.set_use_gravity(body, false);
+                    sim.world.set_angular_drag(body, 4.0);
+                    held += 1;
+                }
+            }
+        }
+        if held > 0 {
+            info!("stage events: {held} bendable bone(s) held against gravity");
+        }
+    }
     let poses = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
     for (i, node) in nodes.iter().enumerate() {
         let inst = sim.scenes[0].0;
@@ -574,5 +593,30 @@ fn init(
             state.triggers.len(),
             state.zones.len()
         );
+    }
+}
+
+/// Debug (`GB_DRIFT_REPORT=1`): once, ~2 s in, print the stage bodies that moved furthest from their
+/// authored pose (joint/solver problems show up here before they look like deformed railings).
+pub fn drift_report(sim: NonSend<Sim>, mut done: Local<bool>) {
+    if *done || std::env::var_os("GB_DRIFT_REPORT").is_none() || sim.world.steps < 100 {
+        return;
+    }
+    *done = true;
+    let (inst, src, _) = &sim.scenes[0];
+    let poses = src.world_poses(gb_phys::Pose::IDENTITY);
+    let mut moved: Vec<(f32, usize, Vec3, Vec3)> = Vec::new();
+    for (node, body) in &sim.world.instances[*inst].bodies {
+        let expected = poses[*node].position;
+        let pose = sim.world.pose(*body);
+        let actual = pose.position;
+        // Rotation error (degrees) counts as drift too: a few degrees on a bone chain bends a skinned rail.
+        let angle = pose.rotation.angle_between(poses[*node].rotation).to_degrees();
+        moved.push(((actual - expected).length() + angle * 0.01, *node, expected, actual));
+    }
+    moved.sort_by(|a, b| b.0.total_cmp(&a.0));
+    info!("drift report: {} bodies, top movers:", moved.len());
+    for (d, node, e, a) in moved.iter().take(10) {
+        info!("  node {node} {} moved score {d:.3}  expected {e:?} actual {a:?}", src.nodes[*node].path.rsplit('/').next().unwrap_or(""));
     }
 }
