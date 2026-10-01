@@ -1058,6 +1058,17 @@ fn init(
             });
         }
     }
+    // TruckWheels: both wheels spin about their local X at `speed` deg/s (4000 = 40 m/s road on 0.6 m wheels).
+    for node in nodes.iter() {
+        if let Some(d) = script_of(node, "TruckWheels") {
+            let speed = d["speed"].as_f64().unwrap_or(0.0) as f32;
+            for key in ["leftWheel", "rightWheel"] {
+                if let Some(&e) = d[key]["node"].as_u64().and_then(|n| map.0.get(&(0, n as usize))) {
+                    state.spinners.push((e, Vec3::new(speed, 0.0, 0.0)));
+                }
+            }
+        }
+    }
     let poses = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
     for (i, node) in nodes.iter().enumerate() {
         if script_of(node, "Liquid").is_some() && state.water_level.is_none() {
