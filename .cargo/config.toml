@@ -1,0 +1,4 @@
+# Keep builds light on the machine: cap parallel jobs at 4 of 8 cores so the
+# browser/other apps stay usable. Override any time with `cargo -j N`.
+[build]
+jobs = 4

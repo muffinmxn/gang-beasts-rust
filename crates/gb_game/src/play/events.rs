@@ -1,0 +1,578 @@
+//! Stage events driven by scene scripts that the exporter only records as data.
+//!
+//! * Inactive GameObjects: Unity never draws a node that is inactive (nor its children). The
+//!   exporter keeps their active children's meshes, so every pooled prop used to sit visible in the
+//!   level (the subway's trains were parked in the middle of the map). They start hidden here.
+//! * Subway trains (`PoolSpawner` + `SyncPool` + `Train` + `TrainPush` + `PoolSpawnTrigger` +
+//!   `TrainDespawnZone`): decompiled in `re/decomp/Train*.c` and `CoreNet.Pooling.*`.
+//!   - `PoolSpawner` activates a pooled item after a random `DelayMin..DelayMax` and
+//!     `PoolSpawnTrigger` volumes (an Actor standing inside, re-checked every `RepeatTime`) spawn
+//!     one as soon as `DelayMin` has passed.
+//!   - `Train.FixedUpdate` (0x5506A0): a kinematic body `MovePosition(pos + moveAmount * dt)`.
+//!   - `TrainPush.OnTriggerStay` (0x7915D0): every rigidbody in the trigger gets
+//!     `AddForce(direction * force)`.
+//!   - `TrainDespawnZone.OnTriggerEnter` (0x550A30): a Train entering repools itself.
+use super::*;
+use gb_phys::source::{mirror_position, mirror_rotation, vec3};
+
+struct Train {
+    node: usize,
+    entity: Entity,
+    /// Train.moveAmount, Unity space, metres per second.
+    velocity: Vec3,
+    /// Root BoxCollider in Unity space, relative to the root: centre and half extents.
+    box_center: Vec3,
+    box_half: Vec3,
+    layer: u32,
+    body: Option<usize>,
+    live: bool,
+    /// (entity, direction * 1, force, centre, half) of the TrainPush triggers under this train.
+    pushes: Vec<Push>,
+    spawner: usize,
+}
+
+struct Push {
+    entity: Entity,
+    direction: Vec3,
+    force: f32,
+    center: Vec3,
+    half: Vec3,
+}
+
+struct Spawner {
+    entity: Entity,
+    pool: Vec<usize>,
+    delay_min: f32,
+    delay_max: f32,
+    since: f32,
+    next: f32,
+}
+
+struct Trigger {
+    entity: Entity,
+    spawner: usize,
+    repeat: f32,
+    timer: f32,
+    center: Vec3,
+    half: Vec3,
+}
+
+struct Zone {
+    entity: Entity,
+    center: Vec3,
+    half: Vec3,
+}
+
+/// `WheelRotator` (0x7B8D00 / 0x7B8DA0): the Ferris wheel axle is a kinematic body spun about its
+/// local Z; every 5-20 s it re-rolls a `wheelState` (0..100) that picks a target speed.
+struct Wheel {
+    body: usize,
+    pose: Iso,
+    speed: f32,
+    state: f32,
+    timer: f32,
+    max_speed: f32,
+}
+
+/// `Road` (0x7487E0): a kinematic road tile that MoveTowards(end) at `speed` and wraps to `start`.
+struct Road {
+    body: usize,
+    pose: Iso,
+    start: Vec3,
+    end: Vec3,
+    speed: f32,
+}
+
+/// `TruckBase` (0x7A8560): keeps the truck inside `start + [min, max]` (x/z) with a gentle force
+/// and wanders along a random `direction` re-rolled every 0..10 s.
+struct Truck {
+    body: usize,
+    start: Vec3,
+    min: Vec3,
+    max: Vec3,
+    force: f32,
+    out_of_bounds: bool,
+    direction: Vec3,
+    next_direction: f32,
+}
+
+#[derive(Default)]
+pub struct StageEvents {
+    key: (usize, usize),
+    ready: bool,
+    trains: Vec<Train>,
+    spawners: Vec<Spawner>,
+    triggers: Vec<Trigger>,
+    zones: Vec<Zone>,
+    wheels: Vec<Wheel>,
+    roads: Vec<Road>,
+    trucks: Vec<Truck>,
+    /// `RotateOverTime` (0x736400): (entity, degrees per second about each Unity axis).
+    spinners: Vec<(Entity, Vec3)>,
+    rng: u32,
+}
+
+impl StageEvents {
+    fn rand01(&mut self) -> f32 {
+        self.rng = self.rng.wrapping_mul(1664525).wrapping_add(1013904223);
+        (self.rng >> 8) as f32 / (1u32 << 24) as f32
+    }
+}
+
+fn collider_box(node: &gb_phys::source::Node) -> Option<(Vec3, Vec3)> {
+    let c = node.components.iter().find(|c| c.kind == "BoxCollider")?;
+    let center = vec3(&c.data["m_Center"]);
+    let size = vec3(&c.data["m_Size"]);
+    Some((center, size * 0.5))
+}
+
+/// Local-space containment test for a Unity-space collider box on a Bevy entity.
+fn inside(global: &GlobalTransform, center: Vec3, half: Vec3, point_bevy: Vec3) -> bool {
+    let local = global.affine().inverse().transform_point3(point_bevy);
+    (local - mirror_position(center)).abs().cmple(half).all()
+}
+
+fn actor_points(sim: &Sim) -> Vec<(usize, Vec3)> {
+    let mut out = Vec::new();
+    for (k, actor) in sim.actors.iter().enumerate() {
+        if sim.parked.get(k).copied().unwrap_or(false) {
+            continue;
+        }
+        for part in Part::ALL {
+            let body = actor.beast.body(part);
+            out.push((body, sim.world.pose(body).position));
+        }
+    }
+    out
+}
+
+pub fn stage_events(
+    mut sim: NonSendMut<Sim>,
+    map: Res<NodeEntities>,
+    time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
+    mut state: Local<StageEvents>,
+    mut transforms: Query<&mut Transform>,
+    globals: Query<&GlobalTransform>,
+    mut visibility: Query<&mut Visibility>,
+) {
+    if sim.lobby {
+        return;
+    }
+    let Some((_, stage, _)) = sim.scenes.first() else { return };
+    let key = (stage.nodes.len(), sim.world.instances.len());
+    if state.key != key {
+        *state = StageEvents { key, rng: 0x9E3779B9 ^ key.0 as u32, ..Default::default() };
+    }
+    if !state.ready {
+        let n = sim.scenes[0].1.nodes.len();
+        if !scene_mapping_complete(map.0.keys().copied(), 0, n) {
+            return;
+        }
+        state.ready = true;
+        init(&mut sim, &map, &mut state, &mut visibility);
+    }
+    let dt = time.delta_secs().min(0.1);
+    let alpha = fixed.overstep_fraction() * fixed.timestep().as_secs_f32();
+    let points = actor_points(&sim);
+
+    // Wheel axles.
+    for i in 0..state.wheels.len() {
+        let (timer, max) = (state.wheels[i].timer - dt, state.wheels[i].max_speed);
+        state.wheels[i].timer = timer;
+        if timer <= 0.0 {
+            let st = state.rand01() * 100.0;
+            let span = if st > 50.0 && st <= 80.0 { 10.0 } else if st > 90.0 { 15.0 } else { 20.0 };
+            let t = 5.0 + state.rand01() * (span - 5.0);
+            state.wheels[i].state = st;
+            state.wheels[i].timer = t;
+        }
+        let w = &mut state.wheels[i];
+        let (target, rate) = match w.state {
+            s if s == 0.0 => (10.0, 5.0),
+            s if s <= 25.0 => (20.0, 5.0),
+            s if s <= 50.0 => (-20.0, 5.0),
+            s if s <= 65.0 => (60.0, 20.0),
+            s if s <= 80.0 => (-60.0, 20.0),
+            s if s <= 85.0 => (max, 20.0),
+            s if s <= 90.0 => (-max, 20.0),
+            _ => (0.0, 80.0),
+        };
+        let step = rate * dt;
+        w.speed += (target - w.speed).clamp(-step, step);
+        w.speed = w.speed.clamp(-max, max);
+    }
+    for w in &mut state.wheels {
+        let turn = Quat::from_rotation_z((w.speed * dt).to_radians());
+        w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
+        sim.world.move_kinematic(w.body, w.pose);
+    }
+    // RotateOverTime: Transform.Rotate(speed * dt, Space.Self), e.g. the background 'City Pivot'.
+    for (entity, speed) in &state.spinners {
+        if let Ok(mut tf) = transforms.get_mut(*entity) {
+            let d = *speed * dt;
+            let q = Quat::from_euler(EulerRot::ZXY, d.z.to_radians(), d.x.to_radians(), d.y.to_radians());
+            tf.rotation = (tf.rotation * mirror_rotation(q)).normalize();
+        }
+    }
+    // Scrolling roads (the Trucks stage's treadmill).
+    for r in &mut state.roads {
+        let to = r.end - r.pose.position;
+        let step = r.speed * dt;
+        let position = if to.length() <= step { r.start } else { r.pose.position + to.normalize() * step };
+        r.pose = Iso::new(position, r.pose.rotation);
+        sim.world.move_kinematic(r.body, r.pose);
+    }
+    // Truck wander. Forces are per physics step, so scale by frame time over step time.
+    let step_scale = dt / fixed.timestep().as_secs_f32();
+    for i in 0..state.trucks.len() {
+        let r1 = state.rand01() * 2.0 - 1.0;
+        let r2 = state.rand01() * 2.0 - 1.0;
+        let r3 = state.rand01() * 10.0;
+        let t = &mut state.trucks[i];
+        t.next_direction -= dt;
+        if t.next_direction <= 0.0 {
+            t.direction = Vec3::new(t.force * r1, 0.0, t.force * r2);
+            t.next_direction = r3;
+        }
+        let p = sim.world.pose(t.body).position;
+        let rel = p - t.start;
+        let mut f = Vec3::ZERO;
+        if rel.x < t.min.x {
+            f += Vec3::X * t.force * 4.0;
+        } else if rel.x > t.max.x {
+            f += Vec3::NEG_X * t.force * 4.0;
+        }
+        if rel.z < t.min.z {
+            f += Vec3::Z * t.force * 2.0;
+        } else if rel.z > t.max.z {
+            f += Vec3::NEG_Z * t.force * 2.0;
+        }
+        t.out_of_bounds = f != Vec3::ZERO;
+        if !t.out_of_bounds {
+            f = t.direction;
+        }
+        sim.world.add_force(t.body, f * step_scale, 0);
+    }
+
+    // PoolSpawner timers and PoolSpawnTriggers.
+    for s in &mut state.spawners {
+        s.since += dt;
+    }
+    let mut spawn_requests: Vec<usize> = Vec::new();
+    for (i, s) in state.spawners.iter().enumerate() {
+        if s.since >= s.next {
+            spawn_requests.push(i);
+        }
+    }
+    for t in &mut state.triggers {
+        t.timer += dt;
+        if t.timer < t.repeat {
+            continue;
+        }
+        let Ok(g) = globals.get(t.entity) else { continue };
+        if points
+            .iter()
+            .any(|(_, p)| inside(g, t.center, t.half, mirror_position(*p)))
+        {
+            t.timer = 0.0;
+            spawn_requests.push(t.spawner);
+        }
+    }
+    spawn_requests.sort_unstable();
+    spawn_requests.dedup();
+    for si in spawn_requests {
+        let (since, delay_min) = (state.spawners[si].since, state.spawners[si].delay_min);
+        let Some(&ti) = state.spawners[si].pool.iter().find(|&&t| !state.trains[t].live) else {
+            continue;
+        };
+        // A trigger only spawns once DelayMin has elapsed; the timer path always has.
+        if since < delay_min {
+            continue;
+        }
+        let spawner_entity = state.spawners[si].entity;
+        let Ok(spawner_global) = globals.get(spawner_entity) else { continue };
+        let origin_bevy = spawner_global.translation();
+        let train = &mut state.trains[ti];
+        let center = mirror_position(origin_bevy) + train.box_center;
+        let pose = Iso::new(center, Quat::IDENTITY);
+        let body = match train.body {
+            Some(b) => {
+                sim.world.restore_body(b);
+                sim.world.teleport(b, pose);
+                b
+            }
+            None => {
+                let b = sim.world.add_box(pose, train.box_half, 10_000.0, train.layer, train.velocity);
+                sim.world.set_use_gravity(b, false);
+                train.body = Some(b);
+                b
+            }
+        };
+        sim.world.set_linear_velocity(body, train.velocity);
+        train.live = true;
+        info!("train {} spawned at {:?}", train.node, center);
+        if let Ok(mut v) = visibility.get_mut(train.entity) {
+            *v = Visibility::Visible;
+        }
+        let next_min = state.spawners[si].delay_min;
+        let next_max = state.spawners[si].delay_max;
+        let r = state.rand01();
+        let s = &mut state.spawners[si];
+        s.since = 0.0;
+        s.next = next_min + (next_max - next_min).max(0.0) * r;
+    }
+
+    // Live trains: keep the kinematic velocity, follow the body, push, despawn.
+    let mut pushes: Vec<(usize, Vec3)> = Vec::new();
+    let mut despawn: Vec<usize> = Vec::new();
+    for (ti, train) in state.trains.iter().enumerate() {
+        if !train.live {
+            continue;
+        }
+        let Some(body) = train.body else { continue };
+        sim.world.set_linear_velocity(body, train.velocity);
+        let pose = sim.world.pose(body);
+        let shown = pose.position + train.velocity * alpha;
+        let root_unity = shown - train.box_center;
+        let spawner_global = globals.get(state.spawners[train.spawner].entity).ok();
+        if let (Ok(mut tf), Some(sg)) = (transforms.get_mut(train.entity), spawner_global) {
+            tf.translation = mirror_position(root_unity) - sg.translation();
+        }
+        for push in &train.pushes {
+            let Ok(g) = globals.get(push.entity) else { continue };
+            for (b, p) in &points {
+                if inside(g, push.center, push.half, mirror_position(*p)) {
+                    pushes.push((*b, push.direction * push.force));
+                }
+            }
+        }
+        for zone in &state.zones {
+            if let Ok(g) = globals.get(zone.entity) {
+                if inside(g, zone.center, zone.half, mirror_position(pose.position)) {
+                    despawn.push(ti);
+                    break;
+                }
+            }
+        }
+    }
+    for (b, f) in pushes {
+        sim.world.add_force(b, f, 0);
+    }
+    for ti in despawn {
+        let (entity, body) = (state.trains[ti].entity, state.trains[ti].body);
+        if let Some(b) = body {
+            sim.world.set_linear_velocity(b, Vec3::ZERO);
+            sim.world.remove_body(b);
+        }
+        if let Ok(mut v) = visibility.get_mut(entity) {
+            *v = Visibility::Hidden;
+        }
+        info!("train {} despawned", state.trains[ti].node);
+        state.trains[ti].live = false;
+    }
+}
+
+fn init(
+    sim: &mut Sim,
+    map: &NodeEntities,
+    state: &mut StageEvents,
+    visibility: &mut Query<&mut Visibility>,
+) {
+    let nodes = sim.scenes[0].1.nodes.clone();
+    // Pooled (Clone) instances are inactive until their spawner activates them.
+    for (i, node) in nodes.iter().enumerate() {
+        // Only pooled instances ("X(Clone)") start hidden. Hiding every inactive node made scene
+        // props that a script or the game mode switches on (e.g. the Rooftop's doors) vanish.
+        let pooled = node.path.rsplit('/').next().is_some_and(|n| n.contains("(Clone)"));
+        if !node.active && !node.render_override && pooled {
+            if let Some(&e) = map.0.get(&(0, i)) {
+                if let Ok(mut v) = visibility.get_mut(e) {
+                    *v = Visibility::Hidden;
+                }
+            }
+        }
+    }
+    let script_of = |node: &gb_phys::source::Node, name: &str| -> Option<serde_json::Value> {
+        node.components
+            .iter()
+            .find(|c| c.script.as_deref() == Some(name))
+            .map(|c| c.data.clone())
+    };
+    // Spawners and their pools.
+    let mut spawner_of_node: HashMap<usize, usize> = HashMap::new();
+    for (i, node) in nodes.iter().enumerate() {
+        let (Some(spawner), Some(pool)) = (script_of(node, "PoolSpawner"), script_of(node, "SyncPool")) else {
+            continue;
+        };
+        let Some(&entity) = map.0.get(&(0, i)) else { continue };
+        let pool_nodes: Vec<usize> = pool["_Pool"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["node"].as_u64().map(|n| n as usize))
+            .collect();
+        let (delay_min, delay_max) = (
+            spawner["DelayMin"].as_f64().unwrap_or(4.0) as f32,
+            spawner["DelayMax"].as_f64().unwrap_or(30.0) as f32,
+        );
+        let si = state.spawners.len();
+        spawner_of_node.insert(i, si);
+        let mut indices = Vec::new();
+        for pn in pool_nodes {
+            let Some(item) = nodes.get(pn) else { continue };
+            let Some(train_data) = script_of(item, "Train") else { continue };
+            let Some(&train_entity) = map.0.get(&(0, pn)) else { continue };
+            let (box_center, box_half) = collider_box(item).unwrap_or((Vec3::ZERO, Vec3::splat(1.0)));
+            // Descendant TrainPush triggers.
+            let mut pushes = Vec::new();
+            for (j, d) in nodes.iter().enumerate() {
+                let Some(push) = script_of(d, "TrainPush") else { continue };
+                let mut cur = d.parent;
+                let mut under = false;
+                while let Some(p) = cur {
+                    if p == pn {
+                        under = true;
+                        break;
+                    }
+                    cur = nodes[p].parent;
+                }
+                if !under {
+                    continue;
+                }
+                let (center, half) = collider_box(d).unwrap_or((Vec3::ZERO, Vec3::ZERO));
+                if let Some(&e) = map.0.get(&(0, j)) {
+                    pushes.push(Push {
+                        entity: e,
+                        direction: vec3(&push["direction"]),
+                        force: push["force"].as_f64().unwrap_or(0.0) as f32,
+                        center,
+                        half,
+                    });
+                }
+            }
+            indices.push(state.trains.len());
+            state.trains.push(Train {
+                node: pn,
+                entity: train_entity,
+                velocity: vec3(&train_data["moveAmount"]),
+                box_center,
+                box_half,
+                layer: item.layer,
+                body: None,
+                live: false,
+                pushes,
+                spawner: si,
+            });
+            if let Ok(mut v) = visibility.get_mut(train_entity) {
+                *v = Visibility::Hidden;
+            }
+        }
+        let r = state.rand01();
+        state.spawners.push(Spawner {
+            entity,
+            pool: indices,
+            delay_min,
+            delay_max,
+            since: 0.0,
+            next: delay_min + (delay_max - delay_min).max(0.0) * r,
+        });
+    }
+    for (i, node) in nodes.iter().enumerate() {
+        if let Some(t) = script_of(node, "PoolSpawnTrigger") {
+            let target = t["TargetSpawner"]["node"].as_u64().map(|n| n as usize);
+            let (Some(si), Some(&entity), Some((center, half))) = (
+                target.and_then(|n| spawner_of_node.get(&n).copied()),
+                map.0.get(&(0, i)),
+                collider_box(node),
+            ) else {
+                continue;
+            };
+            state.triggers.push(Trigger {
+                entity,
+                spawner: si,
+                repeat: t["RepeatTime"].as_f64().unwrap_or(1.5) as f32,
+                timer: 0.0,
+                center,
+                half,
+            });
+        }
+        if script_of(node, "TrainDespawnZone").is_some() {
+            if let (Some(&entity), Some((center, half))) = (map.0.get(&(0, i)), collider_box(node)) {
+                state.zones.push(Zone { entity, center, half });
+            }
+        }
+    }
+    for (i, node) in nodes.iter().enumerate() {
+        if let Some(d) = script_of(node, "RotateOverTime") {
+            if d["rotate"].as_u64().unwrap_or(1) != 0 {
+                if let Some(&e) = map.0.get(&(0, i)) {
+                    state.spinners.push((e, vec3(&d["rotationSpeed"])));
+                }
+            }
+        }
+    }
+    let poses = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
+    for (i, node) in nodes.iter().enumerate() {
+        let inst = sim.scenes[0].0;
+        if let Some(d) = script_of(node, "Road") {
+            let (Some(a), Some(b)) = (d["start"]["node"].as_u64(), d["end"]["node"].as_u64()) else { continue };
+            let (Some(pa), Some(pb)) = (poses.get(a as usize), poses.get(b as usize)) else { continue };
+            if let Some(&body) = sim.world.instances[inst].bodies.get(&i) {
+                let pose = sim.world.pose(body);
+                state.roads.push(Road {
+                    body,
+                    pose,
+                    start: mirror_position(pa.position),
+                    end: mirror_position(pb.position),
+                    speed: d["speed"].as_f64().unwrap_or(0.0) as f32,
+                });
+            }
+        }
+        if let Some(d) = script_of(node, "TruckBase") {
+            if let Some(&body) = sim.world.instances[inst].bodies.get(&i) {
+                state.trucks.push(Truck {
+                    body,
+                    start: sim.world.pose(body).position,
+                    min: vec3(&d["min"]),
+                    max: vec3(&d["max"]),
+                    force: d["force"].as_f64().unwrap_or(0.4) as f32,
+                    out_of_bounds: false,
+                    direction: Vec3::ZERO,
+                    next_direction: 0.0,
+                });
+            }
+        }
+    }
+    for (i, node) in nodes.iter().enumerate() {
+        if let Some(d) = script_of(node, "WheelRotator") {
+            if let Some(&body) = sim.world.instances[sim.scenes[0].0].bodies.get(&i) {
+                let pose = sim.world.pose(body);
+                state.wheels.push(Wheel {
+                    body,
+                    pose,
+                    speed: 0.0,
+                    state: 0.0,
+                    timer: 0.0,
+                    max_speed: d["MaxSpeed"].as_f64().unwrap_or(95.0) as f32,
+                });
+            }
+        }
+    }
+    let _ = state.trains.iter().map(|t| t.node).count();
+    if !state.roads.is_empty() || !state.trucks.is_empty() {
+        info!("stage events: {} road tile(s), {} truck(s)", state.roads.len(), state.trucks.len());
+    }
+    if !state.wheels.is_empty() {
+        info!("stage events: {} wheel axle(s)", state.wheels.len());
+    }
+    if !state.trains.is_empty() {
+        info!(
+            "stage events: {} spawner(s), {} train(s), {} trigger(s), {} despawn zone(s)",
+            state.spawners.len(),
+            state.trains.len(),
+            state.triggers.len(),
+            state.zones.len()
+        );
+    }
+}

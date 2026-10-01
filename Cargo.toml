@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/gb_game", "crates/gb_phys", "crates/gb_logic"]
+
+[workspace.dependencies]
+bevy = "0.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+glam = "0.29"
+
+# Bevy is unbearably slow unoptimized; optimize deps, keep our code fast to rebuild.
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3

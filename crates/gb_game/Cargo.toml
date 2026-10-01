@@ -1,0 +1,11 @@
+[package]
+name = "gb_game"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+gb_phys = { path = "../gb_phys" }
+gb_logic = { path = "../gb_logic" }

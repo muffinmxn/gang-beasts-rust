@@ -1,0 +1,22 @@
+# Whitelist: only the engine source, build files and the tools that read YOUR OWN copy of the game.
+# Everything else (game assets, extracted data, decompiled code, screenshots, notes) stays local.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/Cargo.toml
+!/Cargo.lock
+!/run.bat
+!/.cargo/
+!/crates/
+!/tools/
+/tools/*
+!/tools/extract/
+!/tools/harness/
+__pycache__/
+*.pyc
+*.exe
+*.dll
+*.glb
+*.png
+*.bundle

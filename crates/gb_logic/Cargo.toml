@@ -1,0 +1,9 @@
+[package]
+name = "gb_logic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gb_phys = { path = "../gb_phys" }
+glam.workspace = true
+serde_json.workspace = true

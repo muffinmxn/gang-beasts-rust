@@ -1,0 +1,11 @@
+[package]
+name = "gb_phys"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# PhysX 4.1 — the same SDK generation as Unity 2021.3, so the solver matches the original.
+physx-sys = "=0.4.16"
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
