@@ -74,6 +74,24 @@ struct Wheel {
     max_speed: f32,
 }
 
+/// `OnTriggerStayApplyForce` (0x751570): a door/shutter body is pushed every step with `openForce` while the
+/// door is open and `closeForce` otherwise (VelocityChange; Linear -> AddForce, Torque -> AddTorque). A beast
+/// inside the trigger opens it after `_waitOpenTime`; leaving closes it after `_waitClosedTime`.
+struct Door {
+    trigger: Entity,
+    center: Vec3,
+    half: Vec3,
+    target: usize,
+    torque: bool,
+    open_force: Vec3,
+    close_force: Vec3,
+    wait_open: f32,
+    wait_close: f32,
+    inside_time: f32,
+    outside_time: f32,
+    open: bool,
+}
+
 /// `SimpleBuoyancy.FixedUpdateImpl` (0x7DEE70), simplified: below the liquid surface the body gets an
 /// upward ACCELERATION (AddForceAtPosition mode 5) of `(force * FORCE_MULTIPLIER(2)) * depth / forceFalloff`.
 struct Floater {
@@ -118,6 +136,7 @@ pub struct StageEvents {
     /// `RotateOverTime` (0x736400): (entity, degrees per second about each Unity axis).
     spinners: Vec<(Entity, Vec3)>,
     floaters: Vec<Floater>,
+    doors: Vec<Door>,
     /// `Liquid` surface heights (Unity y) of the stage.
     water_level: Option<f32>,
     rng: u32,
@@ -217,6 +236,34 @@ pub fn stage_events(
         let turn = Quat::from_rotation_z((w.speed * dt).to_radians());
         w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
         sim.world.move_kinematic(w.body, w.pose);
+    }
+    // Doors and shutters.
+    if !state.doors.is_empty() {
+        let step_scale = (dt / fixed.timestep().as_secs_f32()).max(0.0);
+        for d in &mut state.doors {
+            let inside = globals.get(d.trigger).is_ok_and(|g| {
+                points.iter().any(|(_, p)| inside(g, d.center, d.half, mirror_position(*p)))
+            });
+            if inside {
+                d.outside_time = 0.0;
+                d.inside_time += dt;
+                if d.inside_time >= d.wait_open {
+                    d.open = true;
+                }
+            } else {
+                d.inside_time = 0.0;
+                d.outside_time += dt;
+                if d.outside_time >= d.wait_close {
+                    d.open = false;
+                }
+            }
+            let f = if d.open { d.open_force } else { d.close_force } * step_scale;
+            if d.torque {
+                sim.world.add_torque(d.target, f, 2);
+            } else {
+                sim.world.add_force(d.target, f, 2);
+            }
+        }
     }
     // Floating bodies (buoys, ice, crane containers).
     if let Some(level) = state.water_level {
@@ -583,6 +630,34 @@ fn init(
             info!("stage events: {held} bendable bone(s) held against gravity");
         }
     }
+    for node in nodes.iter() {
+        if let Some(d) = script_of(node, "OnTriggerStayApplyForce") {
+            // validGameMode is a GameModeEnum mask: -1 = every mode, otherwise Melee (1) must be set.
+            let mask = d["validGameMode"].as_i64().unwrap_or(-1);
+            if mask != -1 && mask & 1 == 0 {
+                continue;
+            }
+            let inst = sim.scenes[0].0;
+            let (Some(target), Some((center, half))) = (d["target"]["node"].as_u64(), collider_box(node)) else { continue };
+            let Some(&body) = sim.world.instances[inst].bodies.get(&(target as usize)) else { continue };
+            let idx = nodes.iter().position(|n| std::ptr::eq(n, node)).unwrap_or(0);
+            let Some(&entity) = map.0.get(&(0, idx)) else { continue };
+            state.doors.push(Door {
+                trigger: entity,
+                center,
+                half,
+                target: body,
+                torque: d["forceType"].as_i64() == Some(1),
+                open_force: vec3(&d["openForce"]),
+                close_force: vec3(&d["closeForce"]),
+                wait_open: d["_waitOpenTime"].as_f64().unwrap_or(0.5) as f32,
+                wait_close: d["_waitClosedTime"].as_f64().unwrap_or(1.5) as f32,
+                inside_time: 0.0,
+                outside_time: 0.0,
+                open: false,
+            });
+        }
+    }
     let poses = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
     for (i, node) in nodes.iter().enumerate() {
         if script_of(node, "Liquid").is_some() && state.water_level.is_none() {
@@ -649,6 +724,9 @@ fn init(
     let _ = state.trains.iter().map(|t| t.node).count();
     if !state.roads.is_empty() || !state.trucks.is_empty() {
         info!("stage events: {} road tile(s), {} truck(s)", state.roads.len(), state.trucks.len());
+    }
+    if !state.doors.is_empty() {
+        info!("stage events: {} force door(s)", state.doors.len());
     }
     if !state.floaters.is_empty() {
         info!("stage events: {} floating body(ies), water level {:?}", state.floaters.len(), state.water_level);
