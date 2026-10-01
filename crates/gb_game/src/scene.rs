@@ -431,7 +431,7 @@ impl SceneData {
                 })
                 .map(|(i, _)| world[i].compute_transform())
                 .collect();
-            if melee.len() > found.len() {
+            if melee.len() >= 8 && melee.len() > found.len() {
                 return melee;
             }
             if !found.is_empty() {
