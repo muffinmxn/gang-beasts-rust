@@ -74,6 +74,14 @@ struct Wheel {
     max_speed: f32,
 }
 
+/// `SimpleBuoyancy.FixedUpdateImpl` (0x7DEE70), simplified: below the liquid surface the body gets an
+/// upward ACCELERATION (AddForceAtPosition mode 5) of `(force * FORCE_MULTIPLIER(2)) * depth / forceFalloff`.
+struct Floater {
+    body: usize,
+    force: f32,
+    falloff: f32,
+}
+
 /// `Road` (0x7487E0): a kinematic road tile that MoveTowards(end) at `speed` and wraps to `start`.
 struct Road {
     body: usize,
@@ -109,6 +117,9 @@ pub struct StageEvents {
     trucks: Vec<Truck>,
     /// `RotateOverTime` (0x736400): (entity, degrees per second about each Unity axis).
     spinners: Vec<(Entity, Vec3)>,
+    floaters: Vec<Floater>,
+    /// `Liquid` surface heights (Unity y) of the stage.
+    water_level: Option<f32>,
     rng: u32,
 }
 
@@ -206,6 +217,18 @@ pub fn stage_events(
         let turn = Quat::from_rotation_z((w.speed * dt).to_radians());
         w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
         sim.world.move_kinematic(w.body, w.pose);
+    }
+    // Floating bodies (buoys, ice, crane containers).
+    if let Some(level) = state.water_level {
+        let step_scale = dt / fixed.timestep().as_secs_f32();
+        for f in &state.floaters {
+            let y = sim.world.pose(f.body).position.y;
+            let depth = level - y;
+            if depth > 0.0 {
+                let a = (f.force * 2.0 * (depth / f.falloff.max(0.1))).min(60.0);
+                sim.world.add_force(f.body, Vec3::Y * a * step_scale, 5);
+            }
+        }
     }
     // RotateOverTime: Transform.Rotate(speed * dt, Space.Self), e.g. the background 'City Pivot'.
     for (entity, speed) in &state.spinners {
@@ -533,6 +556,22 @@ fn init(
     }
     let poses = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
     for (i, node) in nodes.iter().enumerate() {
+        if script_of(node, "Liquid").is_some() && state.water_level.is_none() {
+            state.water_level = Some(poses[i].position.y);
+        }
+        if let Some(d) = script_of(node, "SimpleBuoyancy") {
+            if d["IsEnabled"].as_u64().unwrap_or(1) != 0 {
+                if let Some(&body) = sim.world.instances[sim.scenes[0].0].bodies.get(&i) {
+                    state.floaters.push(Floater {
+                        body,
+                        force: d["force"].as_f64().unwrap_or(1.0) as f32,
+                        falloff: d["forceFalloff"].as_f64().unwrap_or(0.5) as f32,
+                    });
+                }
+            }
+        }
+    }
+    for (i, node) in nodes.iter().enumerate() {
         let inst = sim.scenes[0].0;
         if let Some(d) = script_of(node, "Road") {
             let (Some(a), Some(b)) = (d["start"]["node"].as_u64(), d["end"]["node"].as_u64()) else { continue };
@@ -581,6 +620,9 @@ fn init(
     let _ = state.trains.iter().map(|t| t.node).count();
     if !state.roads.is_empty() || !state.trucks.is_empty() {
         info!("stage events: {} road tile(s), {} truck(s)", state.roads.len(), state.trucks.len());
+    }
+    if !state.floaters.is_empty() {
+        info!("stage events: {} floating body(ies), water level {:?}", state.floaters.len(), state.water_level);
     }
     if !state.wheels.is_empty() {
         info!("stage events: {} wheel axle(s)", state.wheels.len());
