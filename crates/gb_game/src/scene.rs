@@ -256,7 +256,11 @@ impl SceneData {
                 // Unity's exported UI scenes contain zero-scale RectTransforms (for example the
                 // hidden Credits canvas). Preserve those source-authored UI transforms; zero-scale
                 // physics/world nodes remain invalid.
-                || (node.rect.is_none() && tf.scale.abs().min_element() < 1e-8)
+                // Zero-scale lights / decals / empty groups (Trawler, Chute) are harmless; only a physics
+                // body or collider with no volume is a broken export.
+                || (node.rect.is_none()
+                    && tf.scale.abs().min_element() < 1e-8
+                    && node.components.iter().any(|c| c.kind == "Rigidbody" || c.kind.ends_with("Collider")))
                 || (tf.rotation.length_squared() - 1.0).abs() > 0.01
             {
                 return Err(format!("{}: invalid transform", node.path));
