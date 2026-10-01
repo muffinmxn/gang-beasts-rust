@@ -241,7 +241,7 @@ pub fn stage_events(
             return;
         }
         state.ready = true;
-        init(&mut sim, &map, &mut state, &mut visibility);
+        init(&mut sim, &map, &mut state, &mut visibility, &mut transforms);
     }
     let dt = time.delta_secs().min(0.1);
     let alpha = fixed.overstep_fraction() * fixed.timestep().as_secs_f32();
@@ -564,6 +564,7 @@ fn init(
     map: &NodeEntities,
     state: &mut StageEvents,
     visibility: &mut Query<&mut Visibility>,
+    transforms_init: &mut Query<&mut Transform>,
 ) {
     let nodes = sim.scenes[0].1.nodes.clone();
     // Pooled (Clone) instances are inactive until their spawner activates them.
@@ -698,6 +699,17 @@ fn init(
             }
         }
     }
+    // GerstnerLiquid.offset shifts the visible sea relative to the Liquid node (Trawler: -0.6 m).
+    for (i, node) in nodes.iter().enumerate() {
+        if let Some(d) = script_of(node, "GerstnerLiquid") {
+            let offset = d["offset"].as_f64().unwrap_or(0.0) as f32;
+            if let Some(&e) = map.0.get(&(0, i)) {
+                if let Ok(mut tf) = transforms_init.get_mut(e) {
+                    tf.translation.y += offset;
+                }
+            }
+        }
+    }
     // Dynamic assemblies that a stage script holds up every frame (the script is not ported): the Crane's
     // arm/hook bodies (Containers, Crane) and the Gondola base would otherwise just fall. Freeze them in
     // place (kinematic) so what hangs from them (containers, cables, the platform) stays up.
@@ -722,6 +734,12 @@ fn init(
             // Cable segments of the frozen platforms: left dynamic they tear apart against the held ends.
             if script_of(node, "Gondola_Cable").is_some() || script_of(node, "RopeBreak").is_some() {
                 freeze(sim, i);
+            }
+            // Trawler_Mechanics keeps the hull afloat at `floatHeight` every frame: hold it where it was saved.
+            if let Some(d) = script_of(node, "Trawler_Mechanics") {
+                if let Some(n) = d["trawlerHull"]["node"].as_u64() {
+                    freeze(sim, n as usize);
+                }
             }
             if node.path.ends_with("gondola_base") || node.path.ends_with("containerFrameLower") || node.path.ends_with("containerFrameUpper") {
                 freeze(sim, i);
