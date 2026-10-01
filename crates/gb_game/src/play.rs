@@ -1211,10 +1211,14 @@ fn map_nodes(
                             // Water4 shows mostly its _ReflectionColor (sky/sea blue) over the dark base: take that from the
                             // export for the seas whose base colour is a muddy grey/green (Ferris wheel, Trawler).
                             if let Some(n) = material_names.get(e).ok().map(|n| n.0.as_str()) {
+                                // Steam store screenshots (referen/web): every sea is a deep, saturated blue with bright
+                                // glints (Buoy/Lighthouse/Trawler), turquoise in the Crane/Containers harbour.
                                 if n.contains("Wheel") {
-                                    sea.base_color = Color::linear_rgba(0.05, 0.27, 0.50, 0.95);
-                                } else if n.contains("Trawler") {
-                                    sea.base_color = Color::linear_rgba(0.0, 0.30, 0.42, 0.95);
+                                    sea.base_color = Color::linear_rgba(0.04, 0.24, 0.48, 0.96);
+                                } else if n.contains("Trawler") || n.contains("Buoy") || n.contains("Lighthouse") {
+                                    sea.base_color = Color::linear_rgba(0.01, 0.17, 0.42, 0.96);
+                                } else if n.contains("Containers") || n.contains("Crane") {
+                                    sea.base_color = Color::linear_rgba(0.02, 0.32, 0.5, 0.96);
                                 }
                             }
                             sea.alpha_mode = AlphaMode::Blend;

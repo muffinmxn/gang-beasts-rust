@@ -852,7 +852,7 @@ fn setup(
             // Menu lobby: the menu drives this camera; no ground-fog approximation (see below).
         } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "wheel" | "girders" | "billboard")) {
             camera.insert(fog.distance_fog());
-        } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) {
+        } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) && stage.name != "trawler" {
             camera.insert(fog_from_settings(&stage.graphics));
         }
         return;
@@ -886,7 +886,7 @@ fn setup(
         camera.insert(Msaa::Sample4);
     } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "wheel" | "girders" | "billboard")) {
         camera.insert(fog.distance_fog());
-    } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) {
+    } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) && stage.name != "trawler" {
         camera.insert(fog_from_settings(&stage.graphics));
     }
     // Ambient occlusion: the source scene's materials get their crevice/contact depth from
