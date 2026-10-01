@@ -566,7 +566,7 @@ fn setup(
                 });
             };
             hint("<  >  COLOUR   Q/E", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.42), 40.0);
-            hint("SHIFT <  >  COSTUME", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.34), 40.0);
+            hint("Z X  COSTUME   SHIFT <  >", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.34), 40.0);
             hint("SUBMIT", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.40), 40.0);
             hint("BACK", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.46), 40.0);
         }

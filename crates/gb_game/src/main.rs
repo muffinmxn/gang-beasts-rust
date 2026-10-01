@@ -1209,7 +1209,17 @@ fn post_stack(
     let v = |key: &str| {
         setting_number(settings, &["global_volume", "overrides", "color_adjustments", key, "value"], 0.0)
     };
-    let urp = urp_post::UrpPost::new(v("postExposure") + look.exposure, v("contrast"), v("saturation"));
+    // Incinerator's fog/sky are saturated orange-red and the whole room read as a red wash; pull
+    // the colour back a little and lift it (per-stage stand-in until its lightmaps are ported).
+    let (sat_adj, ev_adj) = if stage_name == "incinerator" {
+        (
+            std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(-60.0),
+            std::env::var("GB_INC_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.45),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let urp = urp_post::UrpPost::new(v("postExposure") + look.exposure + ev_adj, v("contrast"), v("saturation") + sat_adj);
     match std::env::var("GB_TONEMAP").as_deref() {
         Ok("urp") | Err(_) => (
             bevy::core_pipeline::tonemapping::Tonemapping::None,
