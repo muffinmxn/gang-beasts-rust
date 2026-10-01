@@ -800,10 +800,10 @@ fn setup(
                         // Unity stores the full cone width; Bevy expects its half angle.
                         // Keep existing stage calibration intact while correcting Alley lights.
                         inner_angle: (light.inner_angle
-                            * if stage.name == "menu" { 0.5 } else { 1.0 })
+                            * if stage.name == "aquarium" { 1.0 } else { 0.5 })
                             .to_radians(),
                         outer_angle: (light.outer_angle
-                            * if stage.name == "menu" { 0.5 } else { 1.0 })
+                            * if stage.name == "aquarium" { 1.0 } else { 0.5 })
                             .to_radians(),
                         shadows_enabled,
                         ..default()
