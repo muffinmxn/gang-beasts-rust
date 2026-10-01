@@ -74,6 +74,18 @@ struct Wheel {
     max_speed: f32,
 }
 
+/// `Elevators_Car` (simplified): the car shuttles between its `floors` (metres above the first one), pausing at
+/// each, as a kinematic body. The malfunction / cable-snap / fall sequence of `Elevators_Logic` is not ported.
+struct Lift {
+    body: usize,
+    pose: Iso,
+    start_y: f32,
+    floors: Vec<f32>,
+    index: usize,
+    going_up: bool,
+    wait: f32,
+}
+
 /// The Train stage's endless track (`TrackPool` 12 m/s, `TrackMover`, pieces `trackSectionOffset` 100 m long): the
 /// train stays at the origin while the straight pieces scroll underneath and recycle at the front. Simplified: only
 /// the straight pool is used (the turn pieces and boulder landslides are not ported).
@@ -178,6 +190,7 @@ pub struct StageEvents {
     doors: Vec<Door>,
     props: Vec<PropSpawner>,
     track: Option<Track>,
+    lifts: Vec<Lift>,
     /// `Liquid` surface heights (Unity y) of the stage.
     water_level: Option<f32>,
     rng: u32,
@@ -277,6 +290,39 @@ pub fn stage_events(
         let turn = Quat::from_rotation_z((w.speed * dt).to_radians());
         w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
         sim.world.move_kinematic(w.body, w.pose);
+    }
+    // Elevator cars.
+    for l in &mut state.lifts {
+        if l.floors.len() < 2 {
+            continue;
+        }
+        let target = l.start_y + (l.floors[l.index] - l.floors[0]);
+        if l.wait > 0.0 {
+            l.wait -= dt;
+        } else {
+            let dy = target - l.pose.position.y;
+            let step = 2.0 * dt;
+            if dy.abs() <= step {
+                l.pose = Iso::new(Vec3::new(l.pose.position.x, target, l.pose.position.z), l.pose.rotation);
+                l.wait = 4.0;
+                if l.going_up {
+                    if l.index + 1 >= l.floors.len() {
+                        l.going_up = false;
+                        l.index -= 1;
+                    } else {
+                        l.index += 1;
+                    }
+                } else if l.index == 0 {
+                    l.going_up = true;
+                    l.index = 1;
+                } else {
+                    l.index -= 1;
+                }
+            } else {
+                l.pose = Iso::new(l.pose.position + Vec3::Y * dy.signum() * step, l.pose.rotation);
+            }
+        }
+        sim.world.move_kinematic(l.body, l.pose);
     }
     // Scrolling track pieces.
     if let Some(track) = &mut state.track {
@@ -767,6 +813,21 @@ fn init(
         if held > 0 {
             info!("stage events: {held} bendable bone(s) held against gravity");
         }
+    }
+    // Elevator cars become kinematic shuttles.
+    for node in nodes.iter() {
+        if let Some(d) = script_of(node, "Elevators_Car") {
+            let inst = sim.scenes[0].0;
+            let Some(carn) = d["car"]["node"].as_u64() else { continue };
+            let Some(&body) = sim.world.instances[inst].bodies.get(&(carn as usize)) else { continue };
+            let floors: Vec<f32> = d["floors"].as_array().into_iter().flatten().filter_map(|v| v.as_f64()).map(|v| v as f32).collect();
+            sim.world.set_kinematic(body, true);
+            let pose = sim.world.pose(body);
+            state.lifts.push(Lift { body, pose, start_y: pose.position.y, floors, index: 1, going_up: true, wait: 3.0 });
+        }
+    }
+    if !state.lifts.is_empty() {
+        info!("stage events: {} elevator car(s)", state.lifts.len());
     }
     // Train stage: straight track pieces scroll; the train itself is held at the origin.
     {
