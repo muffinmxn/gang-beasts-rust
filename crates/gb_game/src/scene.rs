@@ -382,7 +382,31 @@ impl SceneData {
                             .iter()
                             .any(|c| c.script.as_deref() == Some(script))
                 })
-                .map(|(i, _)| world[i].compute_transform())
+                .flat_map(|(i, n)| {
+                    let centre = world[i].compute_transform();
+                    // A GBSpawnCircle places fighters ON a ring of `_raduis` metres (Towers: 9 m
+                    // around the tower top); the centre itself is a hole. Small radii stay a point.
+                    let radius = n
+                        .components
+                        .iter()
+                        .find(|c| c.script.as_deref() == Some("GBSpawnCircle"))
+                        .and_then(|c| c.data["_raduis"].as_f64())
+                        .unwrap_or(0.0) as f32;
+                    if script == "GBSpawnCircle" && radius > 1.5 {
+                        (0..10)
+                            .map(|k| {
+                                let angle = k as f32 / 10.0 * std::f32::consts::TAU;
+                                let mut t = centre;
+                                t.translation += Vec3::new(angle.cos(), 0.0, angle.sin()) * radius;
+                                // `_lookIn`: face the circle's centre.
+                                t.look_at(centre.translation, Vec3::Y);
+                                t
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![centre]
+                    }
+                })
                 .collect();
             if found.len() >= 4 {
                 return found;

@@ -812,6 +812,14 @@ impl World {
         self.set_angular_velocity(body, Vec3::ZERO);
     }
 
+    /// Rigidbody.isKinematic = on (PxRigidBodyFlag::eKINEMATIC): the body stops reacting to forces but still
+    /// pushes dynamic bodies and anchors joints.
+    pub fn set_kinematic(&mut self, body: usize, on: bool) {
+        unsafe {
+            PxRigidBody_setRigidBodyFlag_mut(self.rb(body), PxRigidBodyFlag::eKINEMATIC, on);
+        }
+    }
+
     /// Rigidbody.MovePosition / MoveRotation on a kinematic body: PhysX sweeps it to `pose` over
     /// the next step, pushing whatever is in the way (the wheel axle, moving platforms).
     pub fn move_kinematic(&mut self, body: usize, pose: Iso) {

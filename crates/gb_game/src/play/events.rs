@@ -535,6 +535,35 @@ fn init(
             }
         }
     }
+    // Dynamic assemblies that a stage script holds up every frame (the script is not ported): the Crane's
+    // arm/hook bodies (Containers, Crane) and the Gondola base would otherwise just fall. Freeze them in
+    // place (kinematic) so what hangs from them (containers, cables, the platform) stays up.
+    // `GB_NO_HOLD=1` disables.
+    if std::env::var_os("GB_NO_HOLD").is_none() {
+        let inst = sim.scenes[0].0;
+        let mut frozen = 0;
+        let mut freeze = |sim: &mut Sim, node: usize| {
+            if let Some(&body) = sim.world.instances[inst].bodies.get(&node) {
+                sim.world.set_kinematic(body, true);
+                frozen += 1;
+            }
+        };
+        for (i, node) in nodes.iter().enumerate() {
+            if let Some(d) = script_of(node, "Crane") {
+                for key in ["machineDeck", "mainJib", "pistonStart", "pistonMiddle", "pistonEnd", "armTip", "hook", "lowerHalf"] {
+                    if let Some(n) = d[key]["node"].as_u64() {
+                        freeze(sim, n as usize);
+                    }
+                }
+            }
+            if node.path.ends_with("gondola_base") || node.path.ends_with("containerFrameLower") || node.path.ends_with("containerFrameUpper") {
+                freeze(sim, i);
+            }
+        }
+        if frozen > 0 {
+            info!("stage events: {frozen} scripted body(ies) held in place");
+        }
+    }
     // Bendable rails / bridge frames (Bendable|VariableBreakJoint chains) are limit-only joints with no
     // spring: with gravity they sagged 0.3 m at load. The authored scene holds them at rest, so keep gravity
     // off for those bones; they still bend and break when beasts hit them. `GB_BEND_GRAVITY=1` restores it.
