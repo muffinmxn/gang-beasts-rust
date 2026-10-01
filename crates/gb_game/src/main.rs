@@ -830,7 +830,7 @@ fn setup(
         ));
         if stage.name == "menu" {
             // Menu lobby: the menu drives this camera; no ground-fog approximation (see below).
-        } else if let Some(fog) = &stage.surface_fog {
+        } else if let (Some(fog), true) = (&stage.surface_fog, stage.name == "rooftop") {
             camera.insert(fog.distance_fog());
         } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) {
             camera.insert(fog_from_settings(&stage.graphics));
@@ -864,7 +864,7 @@ fn setup(
         // The outdoor approximation uses skyDepth * 3 as its end, which is only 613 m here:
         // that inverted interval fogged every Alley surface completely white.
         camera.insert(Msaa::Sample4);
-    } else if let Some(fog) = &stage.surface_fog {
+    } else if let (Some(fog), true) = (&stage.surface_fog, stage.name == "rooftop") {
         camera.insert(fog.distance_fog());
     } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) {
         camera.insert(fog_from_settings(&stage.graphics));
