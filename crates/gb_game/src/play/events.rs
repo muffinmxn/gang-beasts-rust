@@ -74,6 +74,21 @@ struct Wheel {
     max_speed: f32,
 }
 
+/// The Train stage's endless track (`TrackPool` 12 m/s, `TrackMover`, pieces `trackSectionOffset` 100 m long): the
+/// train stays at the origin while the straight pieces scroll underneath and recycle at the front. Simplified: only
+/// the straight pool is used (the turn pieces and boulder landslides are not ported).
+struct Track {
+    pieces: Vec<TrackPiece>,
+    speed: f32,
+    length: f32,
+}
+
+struct TrackPiece {
+    entity: Entity,
+    bodies: Vec<(usize, Iso)>,
+    z: f32,
+}
+
 /// Pooled physics props (`CoreNet.Pooling.PoolSpawner` + `Pool`/`SyncPool`, 0x488FD0): Chute's meat paste, Incinerator's
 /// boxes and barrels, Trucks' sign holders. The scene ships each pool as inactive `(Clone)` bodies; they are parked
 /// at load and, every `DelayMin..DelayMax` seconds, one free item is dropped at the spawner (+ `RandomSpawnOffset`).
@@ -162,6 +177,7 @@ pub struct StageEvents {
     floaters: Vec<Floater>,
     doors: Vec<Door>,
     props: Vec<PropSpawner>,
+    track: Option<Track>,
     /// `Liquid` surface heights (Unity y) of the stage.
     water_level: Option<f32>,
     rng: u32,
@@ -261,6 +277,21 @@ pub fn stage_events(
         let turn = Quat::from_rotation_z((w.speed * dt).to_radians());
         w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
         sim.world.move_kinematic(w.body, w.pose);
+    }
+    // Scrolling track pieces.
+    if let Some(track) = &mut state.track {
+        let total = track.length * track.pieces.len() as f32;
+        let back = -track.length * 2.5;
+        for piece in &mut track.pieces {
+            piece.z -= track.speed * dt;
+            if piece.z < back {
+                piece.z += total;
+            }
+            for (body, rest) in &piece.bodies {
+                let p = Iso::new(rest.position + Vec3::new(0.0, 0.0, piece.z), rest.rotation);
+                sim.world.move_kinematic(*body, p);
+            }
+        }
     }
     // Falling props.
     {
@@ -719,13 +750,84 @@ fn init(
             info!("stage events: {held} bendable bone(s) held against gravity");
         }
     }
+    // Train stage: straight track pieces scroll; the train itself is held at the origin.
+    {
+        let inst = sim.scenes[0].0;
+        let poses_t = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
+        if let Some(tp) = nodes.iter().find_map(|n| script_of(n, "TrackPool")) {
+            let speed = tp["trackMovementSpeed"].as_f64().unwrap_or(12.0) as f32;
+            let pool_node = tp["trackPoolStright"]["node"].as_u64().map(|n| n as usize);
+            let mut pieces = Vec::new();
+            if let Some(pool) = pool_node.and_then(|p| script_of(&nodes[p], "Pool")) {
+                for (k, p) in pool["_Pool"].as_array().into_iter().flatten().enumerate() {
+                    let Some(n) = p["node"].as_u64().map(|n| n as usize) else { continue };
+                    let mut bodies = Vec::new();
+                    for (j, _) in nodes.iter().enumerate() {
+                        let mut cur = Some(j);
+                        let mut under = false;
+                        while let Some(c) = cur {
+                            if c == n {
+                                under = true;
+                                break;
+                            }
+                            cur = nodes[c].parent;
+                        }
+                        if under {
+                            if let Some(&b) = sim.world.instances[inst].bodies.get(&j) {
+                                sim.world.set_kinematic(b, true);
+                                bodies.push((b, sim.world.pose(b)));
+                            }
+                        }
+                    }
+                    if let (false, Some(&e)) = (bodies.is_empty(), map.0.get(&(0, n))) {
+                        pieces.push(TrackPiece { entity: e, bodies, z: (k as f32 - 2.0) * 100.0 });
+                    }
+                }
+            }
+            let _ = &poses_t;
+            if !pieces.is_empty() {
+                for piece in &pieces {
+                    if let Ok(mut v) = visibility.get_mut(piece.entity) {
+                        *v = Visibility::Visible;
+                    }
+                }
+                info!("stage events: {} scrolling track piece(s) at {speed} m/s", pieces.len());
+                state.track = Some(Track { pieces, speed, length: 100.0 });
+            }
+            // The train (cars + bogies) sits still on the origin; its NodeFollower forces are not ported.
+            let mut held = 0;
+            if let Some(train_root) = nodes.iter().position(|n| n.path == "Train") {
+                for (j, _) in nodes.iter().enumerate() {
+                    let mut cur = Some(j);
+                    let mut under = false;
+                    while let Some(c) = cur {
+                        if c == train_root {
+                            under = true;
+                            break;
+                        }
+                        cur = nodes[c].parent;
+                    }
+                    if under {
+                        if let Some(&b) = sim.world.instances[inst].bodies.get(&j) {
+                            sim.world.set_kinematic(b, true);
+                            held += 1;
+                        }
+                    }
+                }
+            }
+            if held > 0 {
+                info!("stage events: {held} train body(ies) held");
+            }
+        }
+    }
     // Park every pooled (Clone) body (the scene saves them in the world), then register prop spawners.
     {
         let inst = sim.scenes[0].0;
         let mut parked = 0;
         for (i, node) in nodes.iter().enumerate() {
             // Any body at or below a pooled "(Clone)" root (Chute's meat keeps its body on a child bone).
-            let pooled = node.path.split('/').any(|n| n.contains("(Clone)"));
+            let pooled = node.path.split('/').any(|n| n.contains("(Clone)"))
+                && !node.path.contains("TrackPool (Stright)");
             if pooled {
                 if let Some(&body) = sim.world.instances[inst].bodies.get(&i) {
                     sim.world.remove_body(body);
