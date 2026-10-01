@@ -748,7 +748,10 @@ def export(roots, name, prefab=False, include_inactive_prefix=None, inactive_res
             if t.endswith("Collider"):
                 entry["material"] = physic_material(c.read().m_Material)
             if t == "MeshCollider":
-                entry["collision_mesh"] = collision_mesh(c.read().m_Mesh)
+                try:
+                    entry["collision_mesh"] = collision_mesh(c.read().m_Mesh)
+                except FileNotFoundError as e:  # mesh lives in a CAB the shipped bundles don't include
+                    print("skip missing collision mesh:", path, str(e)[:50]); entry["collision_mesh"] = None
             if t.endswith("Joint"):
                 body = c.read().m_ConnectedBody
                 pending_joints.append((entry, object_key(body) if body.m_PathID else None))
