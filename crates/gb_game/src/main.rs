@@ -653,7 +653,7 @@ fn setup(
         // far too bright. The menu re-enables its baked GI on the correct linear
         // decode; other stages keep their legacy visually-calibrated load until
         // their exposure constants are re-tuned on the linear path too.
-        let image: Handle<Image> = if stage.name == "menu" && std::env::var_os("GB_SRGB_LIGHTMAPS").is_none()
+        let image: Handle<Image> = if (stage.name == "menu" && std::env::var_os("GB_SRGB_LIGHTMAPS").is_none()) || std::env::var_os("GB_LINEAR_LIGHTMAPS").is_some()
         {
             assets.load_with_settings(path.clone(), |settings: &mut ImageLoaderSettings| {
                 settings.is_srgb = false;
