@@ -850,7 +850,7 @@ fn setup(
         ));
         if stage.name == "menu" {
             // Menu lobby: the menu drives this camera; no ground-fog approximation (see below).
-        } else if let (Some(fog), true) = (&stage.surface_fog, stage.name == "rooftop") {
+        } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "wheel" | "girders" | "billboard")) {
             camera.insert(fog.distance_fog());
         } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) {
             camera.insert(fog_from_settings(&stage.graphics));
@@ -884,7 +884,7 @@ fn setup(
         // The outdoor approximation uses skyDepth * 3 as its end, which is only 613 m here:
         // that inverted interval fogged every Alley surface completely white.
         camera.insert(Msaa::Sample4);
-    } else if let (Some(fog), true) = (&stage.surface_fog, stage.name == "rooftop") {
+    } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "wheel" | "girders" | "billboard")) {
         camera.insert(fog.distance_fog());
     } else if stage.graphics["render_settings"]["fog"].as_bool() == Some(true) {
         camera.insert(fog_from_settings(&stage.graphics));
@@ -1301,7 +1301,9 @@ fn post_stack(
     };
     // Incinerator's fog/sky are saturated orange-red and the whole room read as a red wash; pull
     // the colour back a little and lift it (per-stage stand-in until its lightmaps are ported).
-    let (sat_adj, ev_adj) = if stage_name == "incinerator" {
+    let (sat_adj, ev_adj) = if stage_name == "ring" {
+        (std::env::var("GB_RING_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(-45.0), 0.0)
+    } else if stage_name == "incinerator" {
         (
             std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0),
             std::env::var("GB_INC_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0),

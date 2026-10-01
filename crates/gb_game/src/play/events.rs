@@ -370,6 +370,9 @@ pub fn stage_events(
             }
             item.live = true;
             item.age = 0.0;
+            if std::env::var_os("GB_PROP_DEBUG").is_some() {
+                info!("prop spawned at {pos:?} ({} bodies)", item.bodies.len());
+            }
             if let Ok(mut v) = visibility.get_mut(item.entity) {
                 *v = Visibility::Visible;
             }
@@ -380,6 +383,10 @@ pub fn stage_events(
         }
         for sp in &mut state.props {
             for item in &mut sp.items {
+                if item.live && std::env::var_os("GB_PROP_DEBUG").is_some() && (item.age - 6.0).abs() < dt {
+                    let p = sim.world.pose(item.bodies[0].0).position;
+                    info!("prop after 6s at {p:?}");
+                }
                 let lowest = item.bodies.iter().map(|(b, _)| sim.world.pose(*b).position.y).fold(f32::MAX, f32::min);
                 if item.live && (item.age > 25.0 || lowest < -60.0) {
                     for (body, _) in &item.bodies {

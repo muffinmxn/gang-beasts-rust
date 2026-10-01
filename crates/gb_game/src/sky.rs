@@ -55,7 +55,10 @@ impl SurfaceFog {
 
     /// Sky colour for a view direction `elevation` degrees above the horizon.
     pub fn sky_color(&self, elevation: f32) -> LinearRgba {
-        let (fog, sky) = (self.fog.to_linear(), self.sky.to_linear());
+        // The crude distance fog on this stage blends toward the fog colour mixed 75% to white; the dome below the
+        // horizon must match it or the gaps in the ground (Towers) show a saturated red disc.
+        let hazy = if self.scatter >= 0.5 { self.fog.mix(&Color::WHITE, env_f32("GB_FOG_WHITE", 0.75).clamp(0.0, 1.0)) } else { self.fog };
+        let (fog, sky) = (hazy.to_linear(), self.sky.to_linear());
         // Mirrored below the horizon: looking down past the roof edge shows deep sky, not a
         // fog-coloured glare (the +1.4 EV post exposure turns the fog colour near-white).
         let t = (elevation.abs() / self.sky_elevation.max(1e-3)).clamp(0.0, 1.0);
