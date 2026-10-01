@@ -1201,11 +1201,14 @@ fn map_nodes(
                             let mut sea = src.clone();
                             let c = src.base_color.to_linear();
                             let dec = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
-                            sea.base_color = Color::linear_rgba(dec(c.red), dec(c.green), dec(c.blue), c.alpha.clamp(0.6, 0.95));
+                            // Darker and less mirror-like than the raw tint: the grey/white look came from the sky
+                            // and fog reflecting in a near-mirror sheet over a pale base.
+                            let tone = std::env::var("GB_SEA_TONE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.3);
+                            sea.base_color = Color::linear_rgba(dec(c.red) * tone * 0.85, dec(c.green) * tone, dec(c.blue) * tone * 1.15, c.alpha.clamp(0.85, 0.98));
                             sea.alpha_mode = AlphaMode::Blend;
-                            sea.perceptual_roughness = 0.12;
+                            sea.perceptual_roughness = 0.22;
                             sea.metallic = 0.0;
-                            sea.reflectance = 0.5;
+                            sea.reflectance = 0.3;
                             sea.emissive = LinearRgba::BLACK;
                             let new = materials.add(sea);
                             if let Ok(mut h) = mesh_materials.get_mut(e) {
