@@ -1191,6 +1191,30 @@ fn map_nodes(
                     }
                 }
             }
+            // "URP FX/Water4" surfaces ("Water - Containers", ...): the exporter wrote the authored colour in
+            // Unity's gamma space as if linear, which turned the deep sea turquoise. Decode it and draw the
+            // sea as a glossy translucent sheet. (Waves / foam / depth fade are not ported.)
+            if meshes.contains(e) && material_names.get(e).is_ok_and(|n| n.0.starts_with("Water")) {
+                if let Ok(handle) = mesh_materials.get(e) {
+                    if let Some(src) = materials.get(&handle.0) {
+                        if !matches!(src.alpha_mode, AlphaMode::Blend) {
+                            let mut sea = src.clone();
+                            let c = src.base_color.to_linear();
+                            let dec = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+                            sea.base_color = Color::linear_rgba(dec(c.red), dec(c.green), dec(c.blue), c.alpha.clamp(0.6, 0.95));
+                            sea.alpha_mode = AlphaMode::Blend;
+                            sea.perceptual_roughness = 0.12;
+                            sea.metallic = 0.0;
+                            sea.reflectance = 0.5;
+                            sea.emissive = LinearRgba::BLACK;
+                            let new = materials.add(sea);
+                            if let Ok(mut h) = mesh_materials.get_mut(e) {
+                                h.0 = new;
+                            }
+                        }
+                    }
+                }
+            }
             let Ok(x) = extras.get(e) else { continue };
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&x.value) {
                 if let Some(n) = v["gb_node"].as_u64() {
