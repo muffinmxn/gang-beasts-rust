@@ -176,7 +176,8 @@ fn run() -> Result<(), String> {
                     .and_then(|name| quality.get(name))
                     .and_then(|entry| entry.get("degenerate"))
                     .and_then(Value::as_bool)
-                    .unwrap_or(false);
+                    .unwrap_or(false)
+                    && std::env::var_os("GB_KEEP_DEGENERATE_LIGHTMAPS").is_none();
                 if flagged {
                     println!("skipping degenerate lightmap atlas (see lightmap-quality.json)");
                 }
@@ -1213,8 +1214,8 @@ fn post_stack(
     // the colour back a little and lift it (per-stage stand-in until its lightmaps are ported).
     let (sat_adj, ev_adj) = if stage_name == "incinerator" {
         (
-            std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(-60.0),
-            std::env::var("GB_INC_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.45),
+            std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(-52.0),
+            std::env::var("GB_INC_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.3),
         )
     } else {
         (0.0, 0.0)

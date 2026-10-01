@@ -491,7 +491,14 @@ class Gltf:
                         emission_tex = self.texture(texs["_EmissionMap"].m_Texture)
                         if emission_tex is not None:
                             m["emissiveTexture"] = {"index": emission_tex}
-            for name in ("_BaseMap", "_MainTex", "_Albedo", "_Diffuse"):
+            # Shader Graph / custom shaders name their albedo differently: known names first, then the
+            # first plain Texture2D_* slot of a Shader Graph that is not a normal map.
+            base_names = ["_BaseMap", "_MainTex", "_Albedo", "_Diffuse", "_BASE_COLOR_MAP", "_DiffuseTex"]
+            if str(extras.get("shader", "")).startswith("Shader Graphs/") and extras.get("shader") != "Shader Graphs/Triplanar":
+                skip = set()
+                base_names += [k for k in texs if k.startswith("Texture2D_") and k not in skip
+                               and texs[k].m_Texture.m_PathID]
+            for name in base_names:
                 if name in texs and texs[name].m_Texture.m_PathID:
                     t = self.texture(texs[name].m_Texture)
                     if t is not None:
@@ -506,8 +513,9 @@ class Gltf:
                 xf = {"scale": [tiling[0], tiling[1]], "offset": [offset[0], 1.0 - tiling[1] - offset[1]]}
                 m["pbrMetallicRoughness"]["baseColorTexture"]["extensions"] = {"KHR_texture_transform": xf}
                 self.uses_texture_transform = True
-            if "_BumpMap" in texs and texs["_BumpMap"].m_Texture.m_PathID:
-                t = self.texture(texs["_BumpMap"].m_Texture, normal=True)
+            normal_prop = next((n for n in ("_BumpMap", "_NormalMap") if n in texs and texs[n].m_Texture.m_PathID), None)
+            if normal_prop:
+                t = self.texture(texs[normal_prop].m_Texture, normal=True)
                 if t is not None:
                     m["normalTexture"] = {"index": t, "scale": float(flts.get("_BumpScale", 1.0))}
             elif (extras.get("shader") == "Shader Graphs/Triplanar"
