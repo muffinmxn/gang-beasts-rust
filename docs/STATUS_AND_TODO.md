@@ -84,13 +84,14 @@ See the "Audio" section in `README.md` for extraction. Status of each part is tr
 
 - [x] Extraction of every `AudioClip` to WAV plus sound configs and per-stage emitter / music data (`tools/extract/audio.py`).
 - [x] Menu clicks, music beds (menu anthem, stage A side + ambience), looping stage machinery (`SceneAudioClip`), object impacts
-  from `PhysicAudioEmitter` data, punches, footsteps by surface, body falls, grunts, KO stingers, round banner stingers.
+  from `PhysicAudioEmitter` data, punches, footsteps by surface, body falls, grunts, swing whooshes, effort voices, win laughs, KO stingers, round banner stingers,
+  shark bite / jaw / splash, cable snaps, glass breaking, water splashes.
 - [ ] Verify real playback on a machine with an audio device (developed headless: the clip selection is logged with
   `GB_AUDIO_DEBUG=1`, loudness values are estimates).
 - [ ] Music: B side, drums by intensity, warp stingers, round-flow transitions (`MusicController`), pause music.
 - [ ] Positional (3D) sources for ambient loops, doppler, mixer groups and snapshots from the AudioMixer assets.
-- [ ] Voices: emotes, laughs, win laughs, snore loop, grab / lift calls; sharks, tentacles, trawler groans, glass break
-  (`SoundEffectScriptable`), cable snap, train / crane / elevator / wheel loops, water splashes, countdown voice (`AudioDatabase`).
+- [ ] Voices: emotes, laughs, snore loop; tentacles, trawler groans, bulb pops, train / crane / elevator / wheel loops,
+  countdown voice (`AudioDatabase`), `SoundOnTriggerEnter` / `PlaySoundOnJointBreak` stage sounds.
 - [ ] Convert the WAVs to Ogg to shrink the 2.6 GB extraction.
 
 ## Physics (`crates/gb_phys`)
