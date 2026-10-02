@@ -21,6 +21,7 @@ const AUDIO: &str = "audio";
 const CREDITS: &str = "credits";
 const FOV_DEGREES: f32 = 40.0;
 const COSTUME_COLOR_ITEM: usize = usize::MAX;
+const COSTUME_PRESET_ITEM: usize = usize::MAX - 2;
 /// Button.m_Colors of the main menu buttons (normal yellow, selected pink).
 const NORMAL: Color = Color::srgb(1.0, 0.752, 0.0);
 const SELECTED: Color = Color::srgb(0.778, 0.442, 0.534);
@@ -66,6 +67,11 @@ pub struct Menu {
     lobby_options: bool,
     /// BeastMenuSpawner spawn points (Managers/Menu/Spawns/Spawn), Bevy space.
     lobby_spawns: Vec<Transform>,
+    /// Costume editor: where the display beast stands, and its actor while the screen is open.
+    editor_spawn: Option<Transform>,
+    editor_actor: Option<usize>,
+    /// Costume editor row label: the costume the display beast wears.
+    editor_costume: String,
     screens: HashMap<&'static str, Screen>,
     current: &'static str,
     selected: Option<usize>,
@@ -181,7 +187,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(PostStartup, setup)
         .add_systems(
             Update,
-            (input, apply_graphics, cycle_for_capture, animate_grain, layout).chain(),
+            (input, apply_graphics, cycle_for_capture, animate_grain, layout, hide_static_rigs).chain(),
         );
 }
 
@@ -425,6 +431,12 @@ fn setup(
             Transform::from_translation(t.translation + Vec3::Y * 0.5).with_rotation(t.rotation)
         })
         .collect();
+    let editor_spawn = nodes.iter().position(|n| n.path == "Managers/Menu/Costume Menu/CameraTarget").map(|i| {
+        let t = world[i].compute_transform();
+        let o = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
+        Transform::from_translation(t.translation + Vec3::new(o("GB_EDITOR_DX", 0.0), o("GB_EDITOR_DY", -0.6), o("GB_EDITOR_DZ", 0.0)))
+            .with_rotation(Quat::from_rotation_y(o("GB_EDITOR_YAW", 1.57)))
+    });
     let mut item_keys = HashMap::new();
     let mut screens = HashMap::new();
     for key in [SPLASH, MAIN, SETTINGS, COSTUME_EDITOR, LOBBY] {
@@ -581,7 +593,21 @@ fn setup(
             hint("SUBMIT", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.40), 40.0);
             hint("BACK", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.46), 40.0);
         }
-        if key == COSTUME_EDITOR {            items.push(COSTUME_COLOR_ITEM);
+        if key == COSTUME_EDITOR {
+            items.push(COSTUME_PRESET_ITEM);
+            item_keys.insert(COSTUME_PRESET_ITEM, "MENU_COSTUME_PRESET".to_string());
+            texts.push(MenuText {
+                world: None,
+                ui_position: Vec2::new(-canvas_size.x * 0.28, -canvas_size.y * 0.30),
+                text: "Costume".to_string(),
+                size: 42.0,
+                align: JustifyText::Center,
+                width: canvas_size.x * 0.45,
+                item: Some(COSTUME_PRESET_ITEM),
+                color: palette.first().map_or(Color::WHITE, |(_, color)| *color),
+                loading: false,
+            });
+            items.push(COSTUME_COLOR_ITEM);
             item_keys.insert(COSTUME_COLOR_ITEM, "MENU_COSTUME_COLOR".to_string());
             let color = palette.first().map_or(Color::WHITE, |(_, color)| *color);
             texts.push(MenuText {
@@ -606,7 +632,11 @@ fn setup(
         let mut nav = HashMap::new();
         for &it in &items {
             if it == COSTUME_COLOR_ITEM {
-                nav.insert(it, (None, None));
+                nav.insert(it, (Some(COSTUME_PRESET_ITEM), None));
+                continue;
+            }
+            if it == COSTUME_PRESET_ITEM {
+                nav.insert(it, (None, Some(COSTUME_COLOR_ITEM)));
                 continue;
             }
             let n = script(it, "Button")
@@ -766,8 +796,8 @@ fn setup(
         ("BACK_MAIN", "Back")], &mut item_keys));
     // Only the unlocked palette is implemented so far; don't expose inert outfit controls.
     if let Some(s) = screens.get_mut(COSTUME_EDITOR) {
-        s.items.retain(|id| *id == COSTUME_COLOR_ITEM);
-        s.texts.retain(|t| t.item == Some(COSTUME_COLOR_ITEM));
+        s.items.retain(|id| *id == COSTUME_COLOR_ITEM || *id == COSTUME_PRESET_ITEM);
+        s.texts.retain(|t| t.item == Some(COSTUME_COLOR_ITEM) || t.item == Some(COSTUME_PRESET_ITEM));
         let back_id = usize::MAX - 1 - item_keys.len();
         item_keys.insert(back_id, "BACK_MAIN".into());
         s.items.push(back_id);
@@ -790,6 +820,9 @@ fn setup(
         host: None,
         lobby_options: false,
         lobby_spawns,
+        editor_spawn,
+        editor_actor: None,
+        editor_costume: String::new(),
         screens,
         current: start,
         selected,
@@ -1254,6 +1287,37 @@ fn input(
     // Lobby (BeastMenuSpawner): A / Space joins (spawns your beast), A again readies up (arms
     // raised), B unreadies, B again backs out. Beasts can't move here. Once the host (first to
     // join) is ready the match options show and the host drives them.
+    // Costume editor: a real beast (so the costume system can dress it) stands in the editor while the screen is open.
+    if menu.current == COSTUME_EDITOR {
+        if menu.editor_actor.is_none() {
+            if let (Some(sim), Some(at)) = (sim.as_mut(), menu.editor_spawn) {
+                let joined = match sim.parked.iter().position(|p| *p) {
+                    Some(k) => {
+                        sim.unpark_beast(k, at);
+                        Ok(k)
+                    }
+                    None => sim.spawn_beast(at),
+                };
+                match joined {
+                    Ok(k) => menu.editor_actor = Some(k),
+                    Err(e) => error!("costume editor beast: {e}"),
+                }
+            }
+        }
+    } else if let Some(k) = menu.editor_actor.take() {
+        if let Some(sim) = sim.as_mut() {
+            if k < sim.parked.len() {
+                sim.park_beast(k);
+            }
+        }
+    }
+    if let (Some(actor), Some(costumes)) = (menu.editor_actor, costumes.as_ref()) {
+        let name = costumes.worn_for(actor).unwrap_or_default();
+        if name != menu.editor_costume {
+            menu.editor_costume = name;
+            menu.dirty = true;
+        }
+    }
     let in_lobby = menu.current == LOBBY;
     // Captured before the lobby block consumes `sim`: the costume switch needs to know whether a
     // beast has spawned yet (it may switch readied or not, but not before joining).
@@ -1457,6 +1521,13 @@ fn input(
             menu.wins - 1
         };
         menu.dirty = true;
+    }
+    if (left || right) && key == "MENU_COSTUME_PRESET" {
+        if let (Some(actor), Some(costumes)) = (menu.editor_actor, costumes.as_mut()) {
+            if costumes.cycle_preset_for(actor, if right { 1 } else { -1 }) {
+                menu.dirty = true;
+            }
+        }
     }
     if (left || right) && key == "MENU_COSTUME_COLOR" && !menu.palette.is_empty() {
         menu.player_color = if right {
@@ -1909,6 +1980,7 @@ fn layout(
             Some("MENU_WINS") if t.text.chars().all(|c| c.is_ascii_digit()) => {
                 Some(menu.wins.to_string())
             }
+            Some("MENU_COSTUME_PRESET") => Some(format!("Costume: {}", if menu.editor_costume.is_empty() { "-" } else { menu.editor_costume.as_str() })),
             Some("MENU_COSTUME_COLOR") => menu
                 .palette
                 .get(menu.player_color)
@@ -2071,4 +2143,45 @@ fn save_prefs(menu: &Menu) {
         dst.extend(src.clone());
     }
     write_prefs(&value);
+}
+
+/// The costume editor shows the real (dressable) beast; the scene's static, head-less body rigs would stand in front of it.
+fn hide_static_rigs(
+    menu: Option<Res<Menu>>,
+    rigs: Query<(Entity, &Name, &Visibility)>,
+    parents: Query<&ChildOf>,
+    scenes: Query<(), With<crate::play::PhysicsScene>>,
+    mut commands: Commands,
+    mut hidden: Local<Vec<Entity>>,
+) {
+    let Some(menu) = menu else { return };
+    if menu.current != COSTUME_EDITOR {
+        for e in hidden.drain(..) {
+            if let Ok(mut c) = commands.get_entity(e) {
+                c.insert(Visibility::Inherited);
+            }
+        }
+        return;
+    }
+    if !hidden.is_empty() {
+        return;
+    }
+    for (e, name, vis) in &rigs {
+        if !(name.as_str() == "actor_body_skinnedMesh" || name.as_str() == "actor_head_skinnedMesh") || *vis == Visibility::Hidden {
+            continue;
+        }
+        let mut cur = e;
+        let mut in_sim = false;
+        while let Ok(p) = parents.get(cur) {
+            cur = p.parent();
+            if scenes.contains(cur) {
+                in_sim = true;
+                break;
+            }
+        }
+        if !in_sim {
+            commands.entity(e).insert(Visibility::Hidden);
+            hidden.push(e);
+        }
+    }
 }

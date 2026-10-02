@@ -1932,6 +1932,10 @@ fn map_nodes(
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&x.value) {
                 if let Some(n) = v["gb_node"].as_u64() {
                     map.0.insert((scene.0, n as usize), e);
+                    // Editor-only reference dummies sit under inactive parents in the menu scene (Unity never draws them).
+                    if scene.0 == 0 && source.nodes.get(n as usize).is_some_and(|nd| nd.path.starts_with("CharacterRefs") || nd.path.starts_with("TestSpheres") || std::env::var("GB_HIDE_PREFIX").ok().is_some_and(|p| nd.path.starts_with(&p))) {
+                        commands.entity(e).insert(Visibility::Hidden);
+                    }
                 }
             }
         }
