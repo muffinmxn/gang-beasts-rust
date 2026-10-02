@@ -662,6 +662,7 @@ pub fn plugin(app: &mut App) {
                 hide_parked,
                 update_hud,
                 crate::round::update_ui,
+                mode_hud,
             )
                 .chain(),
         );
@@ -945,6 +946,50 @@ fn soccer(sim: &mut Sim) {
         for b in &bodies {
             sim.world.teleport(*b, kickoff);
         }
+    }
+}
+
+/// Top-centre mode HUD: Soccer score, Waves counter, or the round number (outlined like the round banner).
+#[derive(Component)]
+struct ModeHud;
+
+fn mode_hud(
+    sim: Option<NonSend<Sim>>,
+    assets: Res<AssetServer>,
+    mut commands: Commands,
+    mut hud: Query<(&mut Text, &mut TextColor, &mut Visibility), With<ModeHud>>,
+) {
+    let Some(sim) = sim else { return };
+    if hud.is_empty() {
+        if sim.lobby {
+            return;
+        }
+        commands.spawn((
+            Text::new(""),
+            TextFont { font: assets.load("ui/fonts/NotoSans-Black.ttf"), font_size: 30.0, ..default() },
+            TextColor(Color::WHITE),
+            TextLayout::new_with_justify(JustifyText::Center),
+            Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), top: Val::Px(14.0), ..default() },
+            ModeHud,
+        ));
+        return;
+    }
+    let text = match sim.round.mode {
+        crate::round::Mode::Soccer => format!("RED  {}  -  {}  BLUE", sim.soccer_score[0], sim.soccer_score[1]),
+        crate::round::Mode::Waves => {
+            let left = (sim.round.players.min(sim.actors.len())..sim.actors.len())
+                .filter(|&k| crate::round::alive(sim.actors[k].state) && !sim.parked[k])
+                .count();
+            format!("WAVE {}   ({} left)", sim.round.wave.max(1), left)
+        }
+        _ => String::new(),
+    };
+    for (mut t, mut c, mut v) in &mut hud {
+        *v = if text.is_empty() { Visibility::Hidden } else { Visibility::Visible };
+        if t.0 != text {
+            t.0 = text.clone();
+        }
+        c.0 = Color::WHITE;
     }
 }
 

@@ -11,7 +11,7 @@
 //! inside a `KeepOut` volume) is *covered*; every beast mesh vertex weighted mostly to a covered
 //! bone is collapsed onto that bone, which removes it exactly where the outfit hides it.
 use bevy::prelude::*;
-use bevy::render::mesh::skinning::SkinnedMeshInverseBindposes;
+
 
 /// One costume collider volume, in the rig's rest-pose space (a capsule/sphere/box approximated
 /// by its oriented bounding box, which is what "is this bone inside" needs).
