@@ -600,6 +600,11 @@ pub fn stage_events(
             // ice and the Trawler hull sat too low. Use the same stiffness as a spring about the authored rest
             // height: a = g + k * (rest - y) - c * vy, which holds the saved pose and still bobs when pushed.
             let pose_y = sim.world.pose(f.body).position.y;
+            // Buoyancy only acts in the water: bodies that carry SimpleBuoyancy but ride above it (the Ferris
+            // wheel's burger cars, crane containers) must hang freely.
+            if pose_y > level + 1.5 && f.rest_y > level + 1.5 {
+                continue;
+            }
             let vy = sim.world.linear_velocity(f.body).y;
             let k = f.force * 2.0 / f.falloff.max(0.1);
             let g = 20.0;
@@ -1349,7 +1354,8 @@ fn init(
                     pose,
                     speed: 0.0,
                     state: 0.0,
-                    timer: 0.0,
+                    // secondsUntilStartEsclationMin/Max: calm turning before the first escalation.
+                    timer: d["secondsUntilStartEsclationMin"].as_f64().unwrap_or(30.0) as f32,
                     max_speed: d["MaxSpeed"].as_f64().unwrap_or(95.0) as f32,
                 });
             }

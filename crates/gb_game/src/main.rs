@@ -866,7 +866,7 @@ fn setup(
         ));
         if stage.name == "menu" {
             // Menu lobby: the menu drives this camera; no ground-fog approximation (see below).
-        } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "wheel" | "girders" | "billboard")) {
+        } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "girders" | "billboard")) {
             camera.insert(fog.distance_fog());
         } else if stage.name == "trawler" {
         // Very light sea haze (user request): far water/horizon melts into a pale blue.
@@ -907,7 +907,7 @@ fn setup(
         // The outdoor approximation uses skyDepth * 3 as its end, which is only 613 m here:
         // that inverted interval fogged every Alley surface completely white.
         camera.insert(Msaa::Sample4);
-    } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "wheel" | "girders" | "billboard")) {
+    } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "girders" | "billboard")) {
         camera.insert(fog.distance_fog());
     } else if stage.name == "trawler" {
         // Very light sea haze (user request): far water/horizon melts into a pale blue.

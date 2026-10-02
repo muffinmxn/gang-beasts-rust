@@ -234,7 +234,17 @@ pub fn joint_basis(axis: Vec3, secondary: Vec3) -> Quat {
     let x = axis.try_normalize().unwrap_or(Vec3::X);
     let mut z = x.cross(secondary);
     if z.length_squared() < 1e-12 {
-        z = x.cross(if x.y.abs() < 0.9 { Vec3::Y } else { Vec3::Z });
+        // Unity's Vector3.OrthoNormalize falls back to OrthoNormalVector(axis) for a parallel secondary axis
+        // (Ferris wheel burger hinges use axis = secondary = Y): the burgers must swing about world Z.
+        let n = x;
+        let t = if n.z.abs() > std::f32::consts::FRAC_1_SQRT_2 {
+            let k = 1.0 / (n.y * n.y + n.z * n.z).sqrt();
+            Vec3::new(0.0, -n.z * k, n.y * k)
+        } else {
+            let k = 1.0 / (n.x * n.x + n.y * n.y).sqrt();
+            Vec3::new(-n.y * k, n.x * k, 0.0)
+        };
+        z = x.cross(t);
     }
     let z = z.normalize();
     let y = z.cross(x);

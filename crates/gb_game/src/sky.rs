@@ -58,7 +58,11 @@ impl SurfaceFog {
         // The crude distance fog on this stage blends toward the fog colour mixed 75% to white; the dome below the
         // horizon must match it or the gaps in the ground (Towers) show a saturated red disc.
         let hazy = if self.scatter >= 0.5 { self.fog.mix(&Color::WHITE, env_f32("GB_FOG_WHITE", 0.75).clamp(0.0, 1.0)) } else { self.fog };
-        let (fog, sky) = (hazy.to_linear(), self.sky.to_linear());
+        // The authored skyColor (0, .14, .69) is the SurfaceFog shader's sky term, not the visible skybox; drawn as-is
+        // it reads as a saturated royal blue. Lift it toward the pale pastel sky the store screenshots show.
+        let lift = env_f32("GB_SKY_LIFT", 0.55).clamp(0.0, 1.0);
+        let sky_c = self.sky.mix(&Color::srgb(0.62, 0.80, 0.97), lift);
+        let (fog, sky) = (hazy.to_linear(), sky_c.to_linear());
         // Mirrored below the horizon: looking down past the roof edge shows deep sky, not a
         // fog-coloured glare (the +1.4 EV post exposure turns the fog colour near-white).
         let t = (elevation.abs() / self.sky_elevation.max(1e-3)).clamp(0.0, 1.0);
