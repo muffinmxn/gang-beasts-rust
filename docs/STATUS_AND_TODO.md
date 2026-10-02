@@ -82,10 +82,16 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 
 See the "Audio" section in `README.md` for extraction. Status of each part is tracked here:
 
-- [~] Extraction of every `AudioClip` to WAV (`tools/extract/audio.py`).
-- [~] Impact / punch / footstep / voice one-shots from physics contacts, UI sounds, music and ambience.
-- [ ] Positional mixing, mixer groups and exact volumes from the game's AudioMixer assets.
-- [ ] Per-surface footsteps, water loops, train / crane / elevator loops, shark and bird calls.
+- [x] Extraction of every `AudioClip` to WAV plus sound configs and per-stage emitter / music data (`tools/extract/audio.py`).
+- [x] Menu clicks, music beds (menu anthem, stage A side + ambience), looping stage machinery (`SceneAudioClip`), object impacts
+  from `PhysicAudioEmitter` data, punches, footsteps by surface, body falls, grunts, KO stingers, round banner stingers.
+- [ ] Verify real playback on a machine with an audio device (developed headless: the clip selection is logged with
+  `GB_AUDIO_DEBUG=1`, loudness values are estimates).
+- [ ] Music: B side, drums by intensity, warp stingers, round-flow transitions (`MusicController`), pause music.
+- [ ] Positional (3D) sources for ambient loops, doppler, mixer groups and snapshots from the AudioMixer assets.
+- [ ] Voices: emotes, laughs, win laughs, snore loop, grab / lift calls; sharks, tentacles, trawler groans, glass break
+  (`SoundEffectScriptable`), cable snap, train / crane / elevator / wheel loops, water splashes, countdown voice (`AudioDatabase`).
+- [ ] Convert the WAVs to Ogg to shrink the 2.6 GB extraction.
 
 ## Physics (`crates/gb_phys`)
 

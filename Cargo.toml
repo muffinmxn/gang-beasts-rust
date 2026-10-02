@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/gb_game", "crates/gb_phys", "crates/gb_logic"]
 
 [workspace.dependencies]
-bevy = "0.16"
+bevy = { version = "0.16", features = ["wav"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 glam = "0.29"

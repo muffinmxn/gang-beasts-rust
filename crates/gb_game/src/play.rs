@@ -13,6 +13,7 @@ use std::fs;
 use std::path::Path;
 
 mod events;
+mod sounds;
 
 /// Everything PhysX owns lives on the main thread.
 pub struct Sim {
@@ -98,6 +99,8 @@ pub struct Sim {
     pub wave_costumes: Vec<(usize, String)>,
     /// Stage reloads so far (stage events re-initialise on change).
     pub reloads: u32,
+    /// Stage export name (audio data lookup).
+    pub stage_name: String,
     /// Soccer: seconds the ball has been (nearly) still.
     ball_idle: f32,
     ball_anchor: Vec3,
@@ -455,6 +458,7 @@ pub fn build(
         rumble_spawns: vec![],
         wave_costumes: vec![],
         reloads: 0,
+        stage_name: stage.to_string(),
         ball_idle: 0.0,
         ball_anchor: Vec3::ZERO,
         wave_door_cache: None,
@@ -1499,6 +1503,9 @@ fn simulate(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     pads: Query<(Entity, &Gamepad)>,
+    mut sfx: ResMut<crate::audio::Sfx>,
+    lib: Res<crate::audio::AudioLib>,
+    mut sound_state: Local<sounds::SoundState>,
 ) {
     let sim = &mut *sim;
     if sim.paused {
@@ -1582,6 +1589,8 @@ fn simulate(
         actor.fixed_update(&mut sim.world, input);
     }
     sim.world.step();
+    sounds::contact_sounds(sim, &mut sound_state, &mut sfx, &lib);
+    sounds::round_sounds(sim, &mut sound_state, &mut sfx, &lib);
     // Lobby (BeastMenuSpawner): beasts stand on their marker and should hold that pose instead of
     // slumping into a heap while the player picks a costume. Every body gets a velocity spring
     // toward its spawn pose (position + rotation), which keeps the whole ragdoll upright without

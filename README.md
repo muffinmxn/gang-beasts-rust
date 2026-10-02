@@ -57,6 +57,16 @@ python tools\extract\export.py graphics stages-rooftop_scenes rooftop-graphics
 Some stages reference meshes that are not in the shipped bundles; the exporter skips those and logs
 `skip missing mesh`. Content bundles are added with `set GB_EXTRA_BUNDLES=stages-trawler` (comma separated).
 
+### Audio (optional, about 2.6 GB of WAV)
+
+```bat
+python tools\extractudio.py all     :: every clip + sound config + per-stage emitters and music
+```
+
+This writes `assets\exportudio\*.wav`, `audio-index.json`, `audio-config.json` and `audio-<stage>.json`. The game plays
+menu clicks, music beds and stage ambience, object impact sounds (from each stage's `PhysicAudioEmitter` data), punches,
+footsteps, grunts and KO stingers. Without these files it runs silent. `GB_NO_AUDIO=1` mutes, `GB_VOLUME=0.8` sets the master.
+
 ## 3. Build and run
 
 ```bat

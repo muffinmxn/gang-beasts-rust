@@ -1,4 +1,5 @@
 //! Asset viewer and headless validation for the Gang Beasts Rust reimplementation.
+mod audio;
 mod costume;
 mod unseen;
 mod devgui;
@@ -405,6 +406,7 @@ fn run() -> Result<(), String> {
             manual_screenshot,
         ),
     );
+    audio::plugin(&mut app, &root);
     if let Some(sim) = sim {
         app.insert_non_send_resource(sim).add_plugins(play::plugin);
         costume::plugin(&mut app, &root);
