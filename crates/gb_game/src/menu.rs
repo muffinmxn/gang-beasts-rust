@@ -1987,24 +1987,49 @@ fn prefs_path() -> Option<std::path::PathBuf> {
     Some(base.join("lobby.json"))
 }
 
-fn load_prefs() -> serde_json::Value {
+pub fn load_prefs() -> serde_json::Value {
     prefs_path()
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or(serde_json::Value::Null)
 }
 
-fn save_prefs(menu: &Menu) {
+/// Records a Waves result (waves survived); returns the best so far.
+pub fn record_waves(survived: u32) -> u32 {
+    let mut prefs = load_prefs();
+    let best = prefs["waves_best"].as_u64().unwrap_or(0) as u32;
+    if survived > best {
+        if !prefs.is_object() {
+            prefs = serde_json::json!({});
+        }
+        prefs["waves_best"] = survived.into();
+        write_prefs(&prefs);
+    }
+    best.max(survived)
+}
+
+fn write_prefs(value: &serde_json::Value) {
     let Some(path) = prefs_path() else { return };
-    let value = serde_json::json!({
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, serde_json::to_vec_pretty(value).unwrap_or_default());
+}
+
+fn save_prefs(menu: &Menu) {
+    let mut value = load_prefs();
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    let fresh = serde_json::json!({
         "mode": menu.mode.id(),
         "stage": menu.stages.get(menu.stage_index),
         "wins": menu.wins,
         "bots": menu.bots,
         "colour": menu.player_color,
     });
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+    if let (Some(dst), Some(src)) = (value.as_object_mut(), fresh.as_object()) {
+        dst.extend(src.clone());
     }
-    let _ = std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap_or_default());
+    write_prefs(&value);
 }

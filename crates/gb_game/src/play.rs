@@ -2968,15 +2968,28 @@ pad buttons: {}",
 /// Waves: when the run is over (everyone down, or all waves cleared) show the result for a few seconds, then go
 /// straight back to the main menu (no balloon/coin win screen).
 fn waves_to_menu(
-    sim: Option<NonSend<Sim>>,
+    sim: Option<NonSendMut<Sim>>,
     time: Res<Time>,
     mut shown: Local<f32>,
     mut exit: EventWriter<AppExit>,
 ) {
-    let Some(sim) = sim else { return };
+    let Some(mut sim) = sim else { return };
     if sim.lobby || sim.round.mode != crate::round::Mode::Waves || !sim.round.game_over {
         *shown = 0.0;
         return;
+    }
+    if *shown == 0.0 {
+        // Waves survived: all four when cleared, otherwise the waves before the one that beat us.
+        let survived = if sim.round.wave as usize >= WAVES.len() && sim.round.message.as_ref().is_some_and(|m| m.text.contains("Defeated")) {
+            WAVES.len() as u32
+        } else {
+            sim.round.wave.saturating_sub(1)
+        };
+        let previous = crate::menu::load_prefs()["waves_best"].as_u64().unwrap_or(0) as u32;
+        let best = crate::menu::record_waves(survived);
+        if let Some(m) = sim.round.message.as_mut() {
+            m.text = if survived > previous { format!("{}  -  new best!", m.text) } else { format!("{}  (best {best})", m.text) };
+        }
     }
     *shown += time.delta_secs();
     if *shown < 4.0 {
