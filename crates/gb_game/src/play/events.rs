@@ -84,14 +84,268 @@ struct Boulders {
     next: f32,
 }
 
-/// `SharkActor` (simplified): a pooled ragdoll lurks 40 m down; every 25-60 s it hunts a beast near the water: it is
-/// moved under it and launched up in a breach, then returns to the deep.
+/// `SharkActor` states (decomp: FixedUpdate switch on `currentState`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum SharkState {
+    Sleeping,
+    Searching,
+    Attacking,
+    Breaching,
+    Carrying,
+    Retreating,
+    Diving,
+}
+
+/// `SharkActor` (ported state machine, rigid-body motion): sleeps `startDelay` + `sleepTime`, then loops
+/// Searching (swim the `searchNodes`) -> Attacking (chase a beast in the water) or Breaching (leap from `breachDepth`
+/// to `breachHeight` at a beast on land) -> Carrying (mouth-held beast taken to the `retreatNodes`) -> Diving
+/// (`diveNodes`) -> Retreating -> Searching. The 12-rigidbody ragdoll is driven as one kinematic body.
 struct Shark {
     bodies: Vec<(usize, Iso)>,
-    root: Vec3,
-    next: f32,
-    phase_until: f32,
-    active: bool,
+    centre: Vec3,
+    fwd0: Vec3,
+    mouth: f32,
+    search: Vec<Vec3>,
+    retreat: Vec<Vec3>,
+    dive: Vec<Vec3>,
+    sleep: (f32, f32),
+    searching: (f32, f32),
+    attacking: (f32, f32),
+    breach_depth: f32,
+    breach_height: f32,
+    speed: f32,
+    state: SharkState,
+    timer: f32,
+    state_len: f32,
+    pos: Vec3,
+    dir: Vec3,
+    node: usize,
+    target: Option<usize>,
+    held: Vec<(usize, Vec3)>,
+    arc: Option<Vec3>,
+    started: bool,
+    start_at: f32,
+}
+
+impl Shark {
+    fn placeholder() -> Shark {
+        Shark {
+            bodies: vec![],
+            centre: Vec3::ZERO,
+            fwd0: Vec3::Z,
+            mouth: 0.0,
+            search: vec![],
+            retreat: vec![],
+            dive: vec![],
+            sleep: (0.0, 0.0),
+            searching: (0.0, 0.0),
+            attacking: (0.0, 0.0),
+            breach_depth: 0.0,
+            breach_height: 0.0,
+            speed: 0.0,
+            state: SharkState::Sleeping,
+            timer: 0.0,
+            state_len: 0.0,
+            pos: Vec3::ZERO,
+            dir: Vec3::Z,
+            node: 0,
+            target: None,
+            held: vec![],
+            arc: None,
+            started: false,
+            start_at: 0.0,
+        }
+    }
+}
+
+fn swim(pos: &mut Vec3, dir: &mut Vec3, to: Vec3, speed: f32, dt: f32) {
+    let want = (to - *pos).normalize_or_zero();
+    if want != Vec3::ZERO {
+        *dir = dir.lerp(want, 1.0 - (-3.0 * dt).exp()).normalize_or(want);
+    }
+    *pos += *dir * speed * dt;
+}
+
+fn closest(points: &[Vec3], p: Vec3) -> usize {
+    points
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (*a.1 - p).length().total_cmp(&(*b.1 - p).length()))
+        .map_or(0, |(i, _)| i)
+}
+
+fn shark_go(sh: &mut Shark, next: SharkState, len: f32) {
+    info!("shark {:?} -> {:?}", sh.state, next);
+    sh.state = next;
+    sh.timer = 0.0;
+    sh.state_len = len;
+}
+
+fn shark_step(sh: &mut Shark, sim: &mut Sim, level: f32, dt: f32, edt: f32, now: f32, r: [f32; 3]) {
+    const G: f32 = 20.0;
+    if !sh.started {
+        if now < sh.start_at {
+            return;
+        }
+        sh.started = true;
+        sh.state_len = sh.sleep.0 + r[0] * (sh.sleep.1 - sh.sleep.0);
+    }
+    sh.timer += edt;
+    // Living beasts and their hips.
+    let alive: Vec<(usize, Vec3)> = sim
+        .actors
+        .iter()
+        .enumerate()
+        .filter(|(k, a)| !sim.parked.get(*k).copied().unwrap_or(false) && crate::round::alive(a.state))
+        .map(|(k, a)| (k, sim.world.pose(a.beast.body(Part::Hips)).position))
+        .collect();
+    let nearest = |p: Vec3| alive.iter().min_by(|a, b| (a.1 - p).length().total_cmp(&(b.1 - p).length())).copied();
+    let mouth_pos = sh.pos + sh.dir * sh.mouth;
+    match sh.state {
+        SharkState::Sleeping => {
+            if sh.timer >= sh.state_len {
+                sh.node = closest(&sh.search, sh.pos);
+                let len = sh.searching.0 + r[1] * (sh.searching.1 - sh.searching.0);
+                shark_go(sh, SharkState::Searching, len);
+            }
+        }
+        SharkState::Searching => {
+            if let Some(&node) = sh.search.get(sh.node) {
+                if (node - sh.pos).length() < 2.0 {
+                    sh.node = (sh.node + 1) % sh.search.len();
+                }
+                swim(&mut sh.pos, &mut sh.dir, node, sh.speed, dt);
+            }
+            if sh.timer >= sh.state_len {
+                match nearest(sh.pos) {
+                    None => shark_go(sh, SharkState::Retreating, 0.0),
+                    Some((k, p)) => {
+                        sh.target = Some(k);
+                        let len = sh.attacking.0 + r[1] * (sh.attacking.1 - sh.attacking.0);
+                        // A beast out of the water is taken by a leap from below; one in the water is chased.
+                        if p.y > level + 1.5 {
+                            sh.arc = None;
+                            shark_go(sh, SharkState::Breaching, len);
+                        } else {
+                            shark_go(sh, SharkState::Attacking, len);
+                        }
+                    }
+                }
+            }
+        }
+        SharkState::Attacking => {
+            let t = sh.target.and_then(|k| alive.iter().find(|a| a.0 == k).copied()).or_else(|| nearest(sh.pos));
+            match t {
+                Some((k, p)) => {
+                    sh.target = Some(k);
+                    let aim = Vec3::new(p.x, p.y.min(level - 0.3), p.z);
+                    swim(&mut sh.pos, &mut sh.dir, aim, sh.speed, dt);
+                    if (mouth_pos - p).length() < 1.8 && p.y < level + 1.2 {
+                        grab(sh, sim, k);
+                        shark_go(sh, SharkState::Carrying, 0.0);
+                    } else if p.y > level + 1.5 {
+                        sh.arc = None;
+                        let len = sh.state_len;
+                        shark_go(sh, SharkState::Breaching, len);
+                    }
+                }
+                None => shark_go(sh, SharkState::Retreating, 0.0),
+            }
+            if sh.state == SharkState::Attacking && sh.timer >= sh.state_len {
+                shark_go(sh, SharkState::Retreating, 0.0);
+            }
+        }
+        SharkState::Breaching => {
+            let t = sh.target.and_then(|k| alive.iter().find(|a| a.0 == k).copied());
+            if let Some(vel) = sh.arc {
+                // Ballistic leap.
+                let v = vel - Vec3::Y * G * dt;
+                sh.arc = Some(v);
+                sh.pos += v * dt;
+                sh.dir = v.normalize_or(sh.dir);
+                if let Some((k, p)) = t {
+                    if (sh.pos + sh.dir * sh.mouth - p).length() < 2.0 {
+                        grab(sh, sim, k);
+                        sh.arc = None;
+                        shark_go(sh, SharkState::Carrying, 0.0);
+                        return apply_shark(sh, sim);
+                    }
+                }
+                if v.y < 0.0 && sh.pos.y < level - 2.0 {
+                    sh.arc = None;
+                    shark_go(sh, SharkState::Attacking, 6.0);
+                }
+            } else if let Some((_, p)) = t {
+                // Get under the target at `breachDepth`, then leap so the apex is over it.
+                let below = Vec3::new(p.x, level + sh.breach_depth, p.z);
+                swim(&mut sh.pos, &mut sh.dir, below, sh.speed, dt);
+                if (below - sh.pos).length() < 2.0 {
+                    let rise = (sh.breach_height - sh.breach_depth).max(1.0);
+                    let vy = (2.0 * G * rise).sqrt();
+                    let t_apex = vy / G;
+                    let h = Vec3::new(p.x - sh.pos.x, 0.0, p.z - sh.pos.z) / t_apex;
+                    sh.arc = Some(Vec3::new(h.x, vy, h.z));
+                }
+                if sh.timer >= sh.state_len {
+                    shark_go(sh, SharkState::Retreating, 0.0);
+                }
+            } else {
+                shark_go(sh, SharkState::Retreating, 0.0);
+            }
+        }
+        SharkState::Carrying => {
+            let node = sh.retreat.get(closest(&sh.retreat, sh.pos)).copied().unwrap_or(sh.pos - Vec3::Y * 20.0);
+            swim(&mut sh.pos, &mut sh.dir, node, sh.speed, dt);
+            let mouth_pos = sh.pos + sh.dir * sh.mouth;
+            for (b, off) in &sh.held {
+                sim.world.teleport(*b, Iso::new(mouth_pos + *off, Quat::IDENTITY));
+                sim.world.set_linear_velocity(*b, Vec3::ZERO);
+                sim.world.set_angular_velocity(*b, Vec3::ZERO);
+            }
+            if (node - sh.pos).length() < 2.5 || sh.timer > 12.0 || sh.pos.y < level - 6.0 {
+                sh.held.clear();
+                shark_go(sh, SharkState::Diving, 0.0);
+            }
+        }
+        SharkState::Diving => {
+            let node = sh.dive.get(closest(&sh.dive, sh.pos)).copied().unwrap_or(sh.pos - Vec3::Y * 20.0);
+            swim(&mut sh.pos, &mut sh.dir, node, sh.speed, dt);
+            if (node - sh.pos).length() < 2.5 || sh.timer > 15.0 {
+                shark_go(sh, SharkState::Retreating, 0.0);
+            }
+        }
+        SharkState::Retreating => {
+            let node = sh.retreat.get(closest(&sh.retreat, sh.pos)).copied().unwrap_or(sh.pos);
+            swim(&mut sh.pos, &mut sh.dir, node, sh.speed, dt);
+            if (node - sh.pos).length() < 2.5 || sh.timer > 15.0 {
+                sh.node = closest(&sh.search, sh.pos);
+                let len = sh.searching.0 + r[2] * (sh.searching.1 - sh.searching.0);
+                shark_go(sh, SharkState::Searching, len);
+            }
+        }
+    }
+    apply_shark(sh, sim);
+}
+
+/// `FixedJoint biteJoint` stand-in: the beast's body parts are carried at the mouth.
+fn grab(sh: &mut Shark, sim: &Sim, actor: usize) {
+    let hips = sim.world.pose(sim.actors[actor].beast.body(Part::Hips)).position;
+    sh.held = Part::ALL
+        .iter()
+        .map(|p| {
+            let b = sim.actors[actor].beast.body(*p);
+            (b, sim.world.pose(b).position - hips)
+        })
+        .collect();
+    info!("shark bites beast {actor}");
+}
+
+fn apply_shark(sh: &Shark, sim: &mut Sim) {
+    let rot = Quat::from_rotation_arc(sh.fwd0, sh.dir.normalize_or(sh.fwd0));
+    for (b, rest) in &sh.bodies {
+        let p = sh.pos + rot * (rest.position - sh.centre);
+        sim.world.move_kinematic(*b, Iso::new(p, rot * rest.rotation));
+    }
 }
 
 /// `Trawler_Mechanics.sinking` / `sinkDelay` (150 s): the hull rolls over and goes down.
@@ -417,43 +671,12 @@ pub fn stage_events(
     // Sharks.
     if !state.sharks.is_empty() {
         let level = state.water_level.unwrap_or(0.0);
-        let mut targets: Vec<Vec3> = Vec::new();
-        for (k, a) in sim.actors.iter().enumerate() {
-            if sim.parked.get(k).copied().unwrap_or(false) || !crate::round::alive(a.state) {
-                continue;
-            }
-            targets.push(sim.world.pose(a.beast.body(Part::Hips)).position);
-        }
+        let edt = dt * std::env::var("GB_EVENT_TIME_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
         for i in 0..state.sharks.len() {
-            let r = [state.rand01(), state.rand01()];
-            let sh = &mut state.sharks[i];
-            if !sh.active && now >= sh.next && !targets.is_empty() {
-                let t = targets[(r[0] * targets.len() as f32) as usize % targets.len()];
-                if t.y < level + 8.0 {
-                    sh.active = true;
-                    sh.phase_until = now + 7.0;
-                    let centre = sh.bodies.first().map(|(_, p)| p.position).unwrap_or(sh.root);
-                    for (b, rest) in &sh.bodies {
-                        let off = rest.position - centre;
-                        sim.world.restore_body(*b);
-                        sim.world.teleport(*b, Iso::new(Vec3::new(t.x, level - 3.0, t.z) + off, Quat::from_rotation_x(-0.5)));
-                        sim.world.set_use_gravity(*b, true);
-                        sim.world.set_linear_velocity(*b, Vec3::new(0.0, 13.0, 0.0));
-                    }
-                    info!("shark breaches at {t:?}");
-                } else {
-                    sh.next = now + 5.0;
-                }
-            }
-            if sh.active && now >= sh.phase_until {
-                for (b, rest) in &sh.bodies {
-                    sim.world.set_linear_velocity(*b, Vec3::ZERO);
-                    sim.world.teleport(*b, *rest);
-                    sim.world.set_use_gravity(*b, false);
-                }
-                sh.active = false;
-                sh.next = now + 25.0 + r[1] * 35.0;
-            }
+            let r = [state.rand01(), state.rand01(), state.rand01()];
+            let mut sh = std::mem::replace(&mut state.sharks[i], Shark::placeholder());
+            shark_step(&mut sh, &mut sim, level, dt, edt, now, r);
+            state.sharks[i] = sh;
         }
     }
     // Trawler capsize.
@@ -1246,11 +1469,50 @@ fn init(
                 continue;
             }
             for (b, _) in &bodies {
-                sim.world.set_use_gravity(*b, false);
+                sim.world.set_kinematic(*b, true);
             }
-            let delay = shark["startDelay"].as_f64().unwrap_or(60.0) as f32;
+            let node_pos = |key: &str| -> Vec<Vec3> {
+                shark[key]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|n| n["node"].as_u64()).filter_map(|n| poses_s.get(n as usize)).map(|p| p.position).collect())
+                    .unwrap_or_default()
+            };
+            let part = |key: &str| shark[key]["node"].as_u64().and_then(|n| poses_s.get(n as usize)).map(|p| p.position);
+            let centre = part("torso").unwrap_or(poses_s[i].position);
+            let (head, tail) = (part("head"), part("tailEnd"));
+            let fwd0 = match (head, tail) {
+                (Some(h), Some(t)) if (h - t).length() > 0.1 => (h - t).normalize(),
+                _ => Vec3::Z,
+            };
+            let mouth = head.map_or(2.0, |h| (h - centre).length() + 0.5);
+            let f = |k: &str, d: f32| shark[k].as_f64().unwrap_or(d as f64) as f32;
             let r = state.rand01();
-            state.sharks.push(Shark { bodies, root: poses_s[i].position, next: 20.0 + delay * 0.5 + r * 20.0, phase_until: 0.0, active: false });
+            state.sharks.push(Shark {
+                bodies,
+                centre,
+                fwd0,
+                mouth,
+                search: node_pos("searchNodes"),
+                retreat: node_pos("retreatNodes"),
+                dive: node_pos("diveNodes"),
+                sleep: (f("minSleepingTime", 60.0), f("maxSleepingTime", 120.0)),
+                searching: (f("minSearchingTime", 5.0), f("maxSearchingTime", 10.0)),
+                attacking: (f("minAttackingTime", 5.0), f("maxAttackingTime", 10.0)),
+                breach_depth: f("breachDepth", -8.0),
+                breach_height: f("breachHeight", 8.0),
+                speed: f("maxVelocity", 10.0),
+                state: SharkState::Sleeping,
+                timer: 0.0,
+                state_len: 0.0,
+                pos: centre,
+                dir: fwd0,
+                node: 0,
+                target: None,
+                held: Vec::new(),
+                arc: None,
+                started: false,
+                start_at: f("startDelay", 60.0) * (0.9 + 0.2 * r),
+            });
         }
         if !state.sharks.is_empty() {
             info!("stage events: {} shark(s)", state.sharks.len());

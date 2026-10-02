@@ -843,6 +843,7 @@ impl World {
         unsafe {
             PxRigidBody_setRigidBodyFlag_mut(self.rb(body), PxRigidBodyFlag::eKINEMATIC, on);
         }
+        self.bodies[body].kinematic = on;
     }
 
     /// Rigidbody.MovePosition / MoveRotation on a kinematic body: PhysX sweeps it to `pose` over
