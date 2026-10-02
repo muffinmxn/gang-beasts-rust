@@ -32,16 +32,19 @@ pub enum Mode {
     Gang,
     /// `GameMode_Waves`: the players are one gang against waves of AI beasts.
     Waves,
+    /// `GameMode_Football` ("Soccer", played on the Alley pitch): two teams, score goals with the ball.
+    Soccer,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 3] = [Mode::Melee, Mode::Gang, Mode::Waves];
+    pub const ALL: [Mode; 4] = [Mode::Melee, Mode::Gang, Mode::Waves, Mode::Soccer];
 
     pub fn id(self) -> &'static str {
         match self {
             Mode::Melee => "melee",
             Mode::Gang => "gang",
             Mode::Waves => "waves",
+            Mode::Soccer => "football",
         }
     }
 
@@ -55,6 +58,7 @@ impl Mode {
             Mode::Melee => "Melee",
             Mode::Gang => "Gang",
             Mode::Waves => "Waves",
+            Mode::Soccer => "Soccer",
         }
     }
 
@@ -63,7 +67,7 @@ impl Mode {
     pub fn team_of(self, k: usize) -> usize {
         match self {
             Mode::Melee => k,
-            Mode::Gang => k % 2,
+            Mode::Gang | Mode::Soccer => k % 2,
             // Local players are team 0; AI beasts (appended after them) are team 1 - see `Round::team`.
             Mode::Waves => k,
         }
@@ -142,6 +146,10 @@ impl Round {
         match self.phase {
             Phase::Playing => {
                 self.round_time += dt;
+                if self.mode == Mode::Soccer {
+                    // Soccer: the score is driven by goals (`play::soccer`); nobody is eliminated.
+                    return;
+                }
                 if self.mode == Mode::Waves {
                     // Waves: the round lasts until every human is down.
                     let humans = self.players.min(alive.len());

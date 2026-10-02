@@ -47,6 +47,14 @@ pub struct Sim {
     pads: HashMap<Entity, usize>,
     /// Scenes that still need a SceneRoot entity.
     pending_roots: Vec<usize>,
+    /// Non-beast physics scenes to render: (scene index, glb file).
+    pending_props: Vec<(usize, String)>,
+    /// Soccer: the ball's (scene, bodies, kick-off pose), goals (team that defends it, centre, rotation, half extents)
+    /// and score per team.
+    ball: Option<(usize, Vec<usize>, Iso)>,
+    goals: Vec<(usize, Vec3, Quat, Vec3)>,
+    pub soccer_score: [u32; 2],
+    dead_time: Vec<f32>,
     /// GlobalCameraMarker.CameraOffsets (Unity space) and the selected one.
     cam_offsets: Vec<Vec3>,
     /// Camera anchor relative to the tracked group, authored by GlobalCameraMarker.
@@ -361,6 +369,11 @@ pub fn build(
         paused: false,
         pads: HashMap::new(),
         pending_roots: vec![],
+        pending_props: vec![],
+        ball: None,
+        goals: vec![],
+        soccer_score: [0, 0],
+        dead_time: vec![],
         cam_offsets: vec![],
         cam_anchor_offset: Vec3::ZERO,
         cam_framing: CameraFraming::default(),
@@ -527,6 +540,42 @@ pub fn build(
     }
     for w in sim.world.instances.iter().flat_map(|i| &i.warnings) {
         warn!("physics: {w}");
+    }
+    // Soccer: spawn the ball (`Assets/Mode/Football/Football.prefab`) at the centre of the two `FootballGoal`s.
+    if sim.round.mode == crate::round::Mode::Soccer {
+        let stage_poses = sim.scenes[0].1.world_poses(Pose::IDENTITY);
+        let nodes = sim.scenes[0].1.nodes.clone();
+        for (i, node) in nodes.iter().enumerate() {
+            let Some(goal) = node.components.iter().find(|c| c.script.as_deref() == Some("FootballGoal")) else { continue };
+            let Some(collider) = node.components.iter().find(|c| c.kind == "BoxCollider") else { continue };
+            let w = stage_poses[i];
+            let center = w.position + w.rotation * (w.scale * gb_phys::source::vec3(&collider.data["m_Center"]));
+            let half = (w.scale * gb_phys::source::vec3(&collider.data["m_Size"]) * 0.5).abs();
+            sim.goals.push((goal.data["GangID"].as_u64().unwrap_or(0) as usize, center, w.rotation, half));
+        }
+        if sim.goals.len() >= 2 {
+            let mid = (sim.goals[0].1 + sim.goals[1].1) * 0.5;
+            match Sidecar::load(root, "football") {
+                Ok(src) => {
+                    let origin = Pose { position: Vec3::new(mid.x, mid.y + 2.0, mid.z), rotation: Quat::IDENTITY, scale: Vec3::ONE };
+                    match sim.world.spawn("football", &src, origin) {
+                        Ok(instance) => {
+                            let bodies: Vec<usize> = sim.world.instances[instance].bodies.values().copied().collect();
+                            let pose = bodies.first().map(|b| sim.world.pose(*b)).unwrap_or(Iso::new(origin.position, Quat::IDENTITY));
+                            sim.scenes.push((instance, src, Mat4::IDENTITY));
+                            let scene = sim.scenes.len() - 1;
+                            sim.pending_props.push((scene, "football.glb".into()));
+                            sim.ball = Some((scene, bodies, pose));
+                            println!("soccer: ball at {mid:?}, {} goals", sim.goals.len());
+                        }
+                        Err(e) => println!("soccer ball: {e}"),
+                    }
+                }
+                Err(e) => println!("soccer ball: {e} (export assets/export/football.*)"),
+            }
+        } else {
+            println!("soccer: this stage has no FootballGoals (play it on Alley)");
+        }
     }
     Ok(sim)
 }
@@ -846,6 +895,59 @@ fn waves(sim: &mut Sim) {
     }
 }
 
+/// `GameMode_Football` (simplified): a ball fully inside a `FootballGoal` scores for the OTHER team, then the ball
+/// returns to kick-off; the first team to `wins_to_win` goals wins. Downed beasts respawn after 3 s.
+fn soccer(sim: &mut Sim) {
+    let dt = sim.world.settings.fixed_timestep;
+    let n = sim.actors.len();
+    sim.dead_time.resize(n, 0.0);
+    for k in 0..n {
+        if crate::round::alive(sim.actors[k].state) || sim.parked[k] {
+            sim.dead_time[k] = 0.0;
+        } else {
+            sim.dead_time[k] += dt;
+            if sim.dead_time[k] > 3.0 {
+                sim.dead_time[k] = 0.0;
+                sim.respawn(k);
+            }
+        }
+    }
+    let Some((_, bodies, kickoff)) = sim.ball.clone() else { return };
+    let Some(&body) = bodies.first() else { return };
+    if sim.round.game_over {
+        return;
+    }
+    let p = sim.world.pose(body).position;
+    let mut scored: Option<usize> = None;
+    for (team, c, r, h) in &sim.goals {
+        let local = r.inverse() * (p - *c);
+        if local.abs().cmple(*h).all() {
+            scored = Some(1 - (*team).min(1));
+        }
+    }
+    // Ball lost off the pitch: back to kick-off.
+    let lost = p.y < kickoff.position.y - 30.0;
+    if let Some(team) = scored {
+        sim.soccer_score[team] += 1;
+        let name = if team == 0 { "Red" } else { "Blue" };
+        let won = sim.soccer_score[team] >= sim.round.wins_to_win;
+        sim.round.message = Some(crate::round::Message {
+            text: if won { format!("{name} Wins {}-{}", sim.soccer_score[0], sim.soccer_score[1]) } else { format!("{name} Scores!  {} - {}", sim.soccer_score[0], sim.soccer_score[1]) },
+            color: sim.player_color(team),
+            age: 0.0,
+        });
+        if won {
+            sim.round.game_over = true;
+        }
+        info!("goal for {name}: {:?}", sim.soccer_score);
+    }
+    if scored.is_some() || lost {
+        for b in &bodies {
+            sim.world.teleport(*b, kickoff);
+        }
+    }
+}
+
 /// Per-bot AI memory (`ControlHandeler_Computer`).
 #[derive(Default, Clone)]
 pub struct Bot {
@@ -898,6 +1000,17 @@ fn bot_inputs(sim: &mut Sim) {
             let d = (hips[j] - me).length();
             if best.map_or(true, |(bd, _)| d < bd) {
                 best = Some((d, hips[j]));
+            }
+        }
+        if mode == crate::round::Mode::Soccer {
+            // Soccer bots run at the ball, aiming to push it toward the goal their team attacks.
+            if let Some((_, bodies, _)) = &sim.ball {
+                if let Some(&b) = bodies.first() {
+                    let ball = sim.world.pose(b).position;
+                    let attack = sim.goals.iter().find(|g| g.0 != mode.team_of(k)).map(|g| g.1);
+                    let aim = attack.map_or(ball, |goal| ball - (goal - ball).normalize_or_zero() * 0.8);
+                    best = Some(((aim - me).length().max(REACH + 0.1), aim));
+                }
             }
         }
         let bot = sim.bots.entry(k).or_default();
@@ -1005,6 +1118,10 @@ fn simulate(
         act::GRAB_RIGHT,
     ];
     for (k, r) in raw.iter().enumerate() {
+        // AI-controlled beasts keep the input `bot_inputs` gave them.
+        if !sim.lobby && k >= sim.round.players {
+            continue;
+        }
         let buttons: Vec<(&'static str, bool)> = names.iter().copied().zip(r.buttons).collect();
         // The game's input driver makes the stick camera-relative before it reaches InputState.
         let world = sim.cam_right * r.h + sim.cam_forward * r.v;
@@ -1149,6 +1266,10 @@ fn simulate(
         let Sim { actors, world, .. } = &mut *sim;
         actors[1].kill(world);
     }
+    // Soccer goals / respawns.
+    if sim.round.mode == crate::round::Mode::Soccer && !sim.lobby {
+        soccer(sim);
+    }
     // Waves mode: AI beasts, wave director.
     if sim.round.mode == crate::round::Mode::Waves && !sim.lobby {
         waves(sim);
@@ -1259,6 +1380,13 @@ fn controls(
 }
 
 fn spawn_roots(mut sim: NonSendMut<Sim>, mut commands: Commands, assets: Res<AssetServer>) {
+    for (scene, file) in std::mem::take(&mut sim.pending_props) {
+        commands.spawn((
+            SceneRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
+            Transform::IDENTITY,
+            PhysicsScene(scene),
+        ));
+    }
     for scene in sim.pending_roots.drain(..) {
         // The physics places every beast node itself, relative to an identity root.
         commands.spawn((

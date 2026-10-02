@@ -113,6 +113,13 @@ fn run() -> Result<(), String> {
     }
     let humans = players;
     let players = (players + bots).min(10);
+    // Alley (Soccer pitch) is a narrow walled court: the follow camera ends up inside the brick walls. The real game
+    // uses a fixed pitch camera there; pin an overview unless the user pinned one.
+    if stage_name == "alley" && std::env::var_os("GB_CAM_EYE").is_none() {
+        std::env::set_var("GB_CAM_EYE", "9,12,22");
+        std::env::set_var("GB_CAM_AT", "9,0,5");
+        std::env::set_var("GB_CAM_FOV", "60");
+    }
     menu_mode |= stage_name == "menu";
     if menu_mode {
         stage_name = "menu".into();
