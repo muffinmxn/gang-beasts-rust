@@ -30,15 +30,18 @@ pub enum Mode {
     #[default]
     Melee,
     Gang,
+    /// `GameMode_Waves`: the players are one gang against waves of AI beasts.
+    Waves,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 2] = [Mode::Melee, Mode::Gang];
+    pub const ALL: [Mode; 3] = [Mode::Melee, Mode::Gang, Mode::Waves];
 
     pub fn id(self) -> &'static str {
         match self {
             Mode::Melee => "melee",
             Mode::Gang => "gang",
+            Mode::Waves => "waves",
         }
     }
 
@@ -51,6 +54,7 @@ impl Mode {
         match self {
             Mode::Melee => "Melee",
             Mode::Gang => "Gang",
+            Mode::Waves => "Waves",
         }
     }
 
@@ -60,6 +64,8 @@ impl Mode {
         match self {
             Mode::Melee => k,
             Mode::Gang => k % 2,
+            // Local players are team 0; AI beasts (appended after them) are team 1 - see `Round::team`.
+            Mode::Waves => k,
         }
     }
 }
@@ -93,6 +99,9 @@ pub struct Round {
     pub colour_names: Vec<String>,
     pub reset_requested: bool,
     pub mode: Mode,
+    /// Number of human-controlled beasts (the rest are Waves AI).
+    pub players: usize,
+    pub wave: u32,
 }
 
 impl Round {
@@ -113,6 +122,8 @@ impl Round {
             colour_names,
             reset_requested: false,
             mode: Mode::from_id(&std::env::var("GB_MODE").unwrap_or_default()),
+            players: usize::MAX,
+            wave: 0,
         }
     }
 
@@ -131,6 +142,15 @@ impl Round {
         match self.phase {
             Phase::Playing => {
                 self.round_time += dt;
+                if self.mode == Mode::Waves {
+                    // Waves: the round lasts until every human is down.
+                    let humans = self.players.min(alive.len());
+                    if humans > 0 && (0..humans).all(|k| !alive[k]) && self.round_time > MIN_ROUND_TIME {
+                        self.phase = Phase::Settle;
+                        self.timer = 0.0;
+                    }
+                    return;
+                }
                 let mut gangs: Vec<usize> = (0..alive.len())
                     .filter(|&k| alive[k])
                     .map(|k| self.mode.team_of(k))
@@ -156,6 +176,13 @@ impl Round {
             }
             Phase::Settle if self.timer >= SETTLE => {
                 let mode = self.mode;
+                if mode == Mode::Waves {
+                    self.message = Some(Message { text: format!("Survived {} waves", self.wave.saturating_sub(1)), color: Color::WHITE, age: 0.0 });
+                    self.game_over = true;
+                    self.phase = Phase::WinnerZoom;
+                    self.timer = 0.0;
+                    return;
+                }
                 let mut winners: Vec<usize> = (0..alive.len()).filter(|&k| alive[k]).collect();
                 // HandleScore: each winning gang +1 (every member shows it); IsGameOver: a gang
                 // reached the win count.

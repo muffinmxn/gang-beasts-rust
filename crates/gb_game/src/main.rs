@@ -270,6 +270,7 @@ fn run() -> Result<(), String> {
     let sim = if menu_mode {
         // Menu Alley lobby: the scene is live physics; beasts join from the lobby screen.
         let mut sim = play::build(&root, &stage_name, spawns.clone(), 0, 0, wins, player_color)?;
+        sim.round.players = players;
         sim.lobby = true;
         // No rounds in the lobby: keep the round-start fade from covering the menu.
         sim.round.round_time = 1.0e6;
@@ -277,7 +278,7 @@ fn run() -> Result<(), String> {
     } else if view_only {
         None
     } else {
-        Some(play::build(
+        let mut built = play::build(
             &root,
             &stage_name,
             spawns.clone(),
@@ -285,7 +286,9 @@ fn run() -> Result<(), String> {
             players,
             wins,
             player_color,
-        )?)
+        )?;
+        built.round.players = players;
+        Some(built)
     };
     let mut app = App::new();
     app.add_plugins(

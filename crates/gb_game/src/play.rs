@@ -78,6 +78,8 @@ pub struct Sim {
     pub device_actor: HashMap<Option<Entity>, usize>,
     /// Lobby: readied up (arms raised, per actor).
     pub lobby_ready: Vec<bool>,
+    /// Waves mode clock (seconds since the last wave was cleared / started).
+    wave_clock: f32,
     /// Lobby: backed out; bodies out of the simulation and hidden until the slot is reused.
     pub parked: Vec<bool>,
     /// Render-only Aquarium tentacle bones; source controllers are inactive in the scene bundle.
@@ -386,6 +388,7 @@ pub fn build(
         lobby_settle: vec![],
         device_actor: HashMap::new(),
         lobby_ready: vec![],
+        wave_clock: 0.0,
         parked: vec![],
         cam_forward: Vec3::Z,
         tentacle_bones,
@@ -811,6 +814,60 @@ fn auto_raw(sim: &Sim) -> Option<Raw> {
 
 /// Gamepad: left stick, A jump, B duck (tap: headbutt), X kick, Y lift, LB/RB arms.
 /// Keyboard + mouse: WASD/arrows, Space jump, Ctrl duck/headbutt, F kick, Shift lift, LMB/RMB arms.
+/// `GameMode_Waves` (simplified): every wave spawns `2 + wave` AI beasts at the stage spawn points; the next wave starts
+/// 5 s after the last AI falls. AI chase the nearest living player and punch when close.
+fn waves(sim: &mut Sim) {
+    let humans = sim.round.players.min(sim.actors.len());
+    if humans == 0 || sim.spawn_points.is_empty() {
+        return;
+    }
+    let dt = sim.world.settings.fixed_timestep;
+    sim.wave_clock += dt;
+    let alive_ai: Vec<usize> = (humans..sim.actors.len())
+        .filter(|&k| crate::round::alive(sim.actors[k].state) && !sim.parked[k])
+        .collect();
+    if alive_ai.is_empty() && sim.wave_clock > 5.0 {
+        sim.round.wave += 1;
+        sim.wave_clock = 0.0;
+        let count = (2 + sim.round.wave as usize).min(8);
+        for i in 0..count {
+            let at = sim.spawn_points[(sim.next_spawn + i) % sim.spawn_points.len()];
+            let k = humans + i;
+            if k < sim.actors.len() {
+                sim.unpark_beast(k, at);
+            } else if let Err(e) = sim.spawn_beast(at) {
+                error!("wave spawn failed: {e}");
+            }
+        }
+        sim.next_spawn += count;
+        info!("wave {} ({} AI)", sim.round.wave, count);
+    }
+    // AI input.
+    let targets: Vec<Vec3> = (0..humans)
+        .filter(|&k| crate::round::alive(sim.actors[k].state))
+        .map(|k| sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position)
+        .collect();
+    let tick = sim.world.steps;
+    for k in humans..sim.actors.len() {
+        if !crate::round::alive(sim.actors[k].state) {
+            continue;
+        }
+        let me = sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position;
+        let Some(t) = targets.iter().copied().min_by(|a, b| (*a - me).length().total_cmp(&(*b - me).length())) else {
+            sim.inputs[k].set(&[], 0.0, 0.0);
+            continue;
+        };
+        let d = Vec3::new(t.x - me.x, 0.0, t.z - me.z);
+        let dist = d.length();
+        let dir = if dist > 0.01 { d / dist } else { Vec3::ZERO };
+        let near = dist < 1.7;
+        let punch = near && (tick / 20) % 2 == 0;
+        let buttons: [(&'static str, bool); 3] = [(act::GRAB_RIGHT, punch), (act::GRAB_LEFT, near && (tick / 25) % 3 == 0), (act::JUMP, false)];
+        let speed = if near { 0.0 } else { 1.0 };
+        sim.inputs[k].set(&buttons, dir.x * speed, dir.z * speed);
+    }
+}
+
 fn simulate(
     mut sim: NonSendMut<Sim>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -1007,6 +1064,10 @@ fn simulate(
     {
         let Sim { actors, world, .. } = &mut *sim;
         actors[1].kill(world);
+    }
+    // Waves mode: AI beasts, wave director.
+    if sim.round.mode == crate::round::Mode::Waves && !sim.lobby {
+        waves(sim);
     }
     // Round flow.
     {
