@@ -574,4 +574,56 @@ mod tests {
         }
         assert_eq!(r.wins, vec![1, 0, 1, 0]);
     }
+
+    #[test]
+    fn mode_ids_round_trip() {
+        for m in Mode::ALL {
+            assert_eq!(Mode::from_id(m.id()), m);
+        }
+        assert_eq!(Mode::from_id("nonsense"), Mode::Melee);
+    }
+
+    #[test]
+    fn soccer_round_is_not_ended_by_knockouts() {
+        let mut r = Round::new(vec!["Red".into(), "Blue".into()]);
+        r.mode = Mode::Soccer;
+        let colors = [Color::WHITE; 2];
+        for _ in 0..300 {
+            r.step(0.02, &[true, false], &colors);
+        }
+        assert_eq!(r.phase, Phase::Playing);
+    }
+
+    #[test]
+    fn rumble_waits_for_all_entrants() {
+        let mut r = Round::new(vec!["Red".into(), "Blue".into()]);
+        r.mode = Mode::Rumble;
+        r.rumble_entrants_left = 3;
+        let colors = [Color::WHITE; 2];
+        for _ in 0..300 {
+            r.step(0.02, &[true, false], &colors);
+        }
+        assert_eq!(r.phase, Phase::Playing);
+        r.rumble_entrants_left = 0;
+        for _ in 0..30 {
+            r.step(0.02, &[true, false], &colors);
+        }
+        assert_ne!(r.phase, Phase::Playing);
+    }
+
+    #[test]
+    fn waves_ends_only_when_every_human_is_down() {
+        let mut r = Round::new(vec!["Red".into(), "Blue".into()]);
+        r.mode = Mode::Waves;
+        r.players = 1;
+        let colors = [Color::WHITE; 3];
+        for _ in 0..300 {
+            r.step(0.02, &[true, false, false], &colors);
+        }
+        assert_eq!(r.phase, Phase::Playing);
+        for _ in 0..30 {
+            r.step(0.02, &[false, true, true], &colors);
+        }
+        assert_ne!(r.phase, Phase::Playing);
+    }
 }
