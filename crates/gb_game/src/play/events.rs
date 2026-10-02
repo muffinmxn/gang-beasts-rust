@@ -368,6 +368,14 @@ struct Fan {
     clock: f32,
 }
 
+/// `Gondola_Cable` (decomp OnCollisionEnter): each cable segment has `health` (20); a collision removes
+/// `clamp(otherMass, 0, 40) * |normal . relativeVelocity| / 1000` scaled by the other object's hit type
+/// (none 0, x10, x50, x150, x100, x200, instant), and at 0 the cable's joints are destroyed.
+struct Cable {
+    body: usize,
+    health: f32,
+}
+
 /// `Crane_RandomPointMover` (simplified base movement): offset along the gantry axis, retargeted every
 /// `stateChangeDelayMin..Max` seconds within `maxDistanceBaseCanMove`, at `baseMovementSpeed`.
 struct CraneMove {
@@ -501,6 +509,7 @@ pub struct StageEvents {
     props: Vec<PropSpawner>,
     track: Option<Track>,
     lifts: Vec<Lift>,
+    cables: Vec<Cable>,
     cranes: Vec<CraneMove>,
     /// `Elevators_Logic` malfunction: (time it happens, which car).
     lift_failure: Option<(f32, usize)>,
@@ -744,6 +753,55 @@ pub fn stage_events(
             state.lifts.remove(car);
             state.lift_failure = None;
             info!("elevator {car} malfunction: cable snapped");
+        }
+    }
+    // Gondola cables.
+    if !state.cables.is_empty() {
+        let beast_hit: HashMap<usize, i32> = sim
+            .actors
+            .iter()
+            .flat_map(|a| Part::ALL.iter().enumerate().map(move |(k, p)| (a.beast.body(*p), a.interact[k])))
+            .collect();
+        let mut hits: Vec<(usize, f32)> = Vec::new();
+        for c in &sim.world.contacts {
+            if c.kind != gb_phys::ContactKind::Enter {
+                continue;
+            }
+            let Some(cab) = state.cables.iter().position(|k| sim.world.actors[c.this].body == Some(k.body)) else { continue };
+            let other = sim.world.actors[c.other];
+            let Some(ob) = other.body else { continue };
+            let mass = sim.world.mass(ob).clamp(0.0, 40.0);
+            let n = c.points.first().map_or(Vec3::ZERO, |p| p.normal);
+            let mut dmg = (mass * n.dot(c.relative_velocity) / 1000.0).abs();
+            let kind = beast_hit.get(&ob).copied().or_else(|| {
+                sim.scenes
+                    .iter()
+                    .position(|s| s.0 == other.instance)
+                    .and_then(|si| sim.stage_interact.get(&(si, other.node)).copied().flatten())
+                    .map(|i| i.damage_modifier)
+            });
+            dmg *= match kind {
+                Some(0) | None => 0.0,
+                Some(2) => 10.0,
+                Some(3) => 50.0,
+                Some(4) | Some(5) => 150.0,
+                Some(6) => 100.0,
+                Some(7) => 200.0,
+                Some(8) => 1.0e6,
+                _ => 1.0,
+            };
+            hits.push((cab, dmg));
+        }
+        for (cab, dmg) in hits {
+            let k = &mut state.cables[cab];
+            if k.health <= 0.0 {
+                continue;
+            }
+            k.health -= dmg;
+            if k.health <= 0.0 {
+                let n = sim.world.release_joints_of(k.body);
+                info!("gondola cable snapped ({n} joints released)");
+            }
         }
     }
     // Cranes.
@@ -1453,6 +1511,11 @@ fn init(
         let inst = sim.scenes[0].0;
         let poses_s = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
         for (i, node) in nodes.iter().enumerate() {
+            if let Some(c) = script_of(node, "Gondola_Cable") {
+                if let Some(&body) = sim.world.instances[inst].bodies.get(&i) {
+                    state.cables.push(Cable { body, health: c["health"].as_f64().unwrap_or(20.0) as f32 });
+                }
+            }
             let Some(shark) = script_of(node, "SharkActor") else { continue };
             let mut bodies = Vec::new();
             for (j, _) in nodes.iter().enumerate() {

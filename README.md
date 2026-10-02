@@ -88,7 +88,7 @@ tools/harness    optional screenshot / comparison helpers
 
 Playable: 23 stages, modes Melee, Gang, Waves (the game's 4-wave data), Soccer (Alley) and Rumble (Ring), local AI
 opponents, costumes, lobby, and many stage events (subway trains, truck roads, Ferris wheel, falling props, doors, fans,
-elevator failure, trawler capsize, sharks, train landslide). Work in progress: per-stage graphics parity, animation
+elevator failure, trawler capsize, shark hunting/breaching/carrying, gondola cables that snap under hits, Gerstner sea waves, train landslide). Work in progress: birds (Rooftop/Crane critters), Train-stage track turns, per-stage graphics parity, animation
 clips, swimming, audio, networking.
 
 ## Contributing
