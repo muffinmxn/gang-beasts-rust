@@ -1101,10 +1101,12 @@ pub struct Bot {
 /// windup 0.2 s -> punch 0.1 s -> reset 0.2 s (`_windupTime/_punchTime/_resetPunchTime`), alternating arms; when it
 /// has not moved for `STUCK_TIMER_MAX` (2 s) it jumps; it occasionally lifts (grab + throw) a nearby enemy.
 /// No NavMesh exists here, so steering is straight-line with a cliff check.
+#[allow(non_snake_case)]
 fn bot_inputs(sim: &mut Sim) {
-    const WINDUP: f32 = 0.2;
-    const PUNCH: f32 = 0.1;
-    const RESET: f32 = 0.2;
+    // `AIProfile` "NormalAI" (core-globalassets): _punchDelayModifier 1.5 scales the Computer controller's
+    // windup/punch/reset (0.2/0.1/0.2 s). `GB_AI_PUNCH_DELAY` overrides (TinyAI 0.75, BigAI 2.0).
+    let delay = std::env::var("GB_AI_PUNCH_DELAY").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.5);
+    let (WINDUP, PUNCH, RESET) = (0.2 * delay, 0.1 * delay, 0.2 * delay);
     const REACH: f32 = 1.4;
     let humans = sim.round.players.min(sim.actors.len());
     let dt = sim.world.settings.fixed_timestep;
