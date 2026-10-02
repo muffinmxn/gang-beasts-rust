@@ -918,6 +918,12 @@ fn soccer(sim: &mut Sim) {
     if sim.round.game_over {
         return;
     }
+    // Debug: GB_SOCCER_TEST=1 drops the ball into the first goal 3 s in (exercises scoring).
+    if std::env::var_os("GB_SOCCER_TEST").is_some() && sim.world.steps % 300 == 150 {
+        if let Some((_, c, _, _)) = sim.goals.first() {
+            sim.world.teleport(body, Iso::new(*c, Quat::IDENTITY));
+        }
+    }
     let p = sim.world.pose(body).position;
     let mut scored: Option<usize> = None;
     for (team, c, r, h) in &sim.goals {
