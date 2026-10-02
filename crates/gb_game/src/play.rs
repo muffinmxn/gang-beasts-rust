@@ -80,6 +80,7 @@ pub struct Sim {
     pub lobby_ready: Vec<bool>,
     /// Waves mode clock (seconds since the last wave was cleared / started).
     wave_clock: f32,
+    bots: HashMap<usize, Bot>,
     /// Lobby: backed out; bodies out of the simulation and hidden until the slot is reused.
     pub parked: Vec<bool>,
     /// Render-only Aquarium tentacle bones; source controllers are inactive in the scene bundle.
@@ -389,6 +390,7 @@ pub fn build(
         device_actor: HashMap::new(),
         lobby_ready: vec![],
         wave_clock: 0.0,
+        bots: HashMap::new(),
         parked: vec![],
         cam_forward: Vec3::Z,
         tentacle_bones,
@@ -842,28 +844,110 @@ fn waves(sim: &mut Sim) {
         sim.next_spawn += count;
         info!("wave {} ({} AI)", sim.round.wave, count);
     }
-    // AI input.
-    let targets: Vec<Vec3> = (0..humans)
-        .filter(|&k| crate::round::alive(sim.actors[k].state))
-        .map(|k| sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position)
-        .collect();
-    let tick = sim.world.steps;
-    for k in humans..sim.actors.len() {
-        if !crate::round::alive(sim.actors[k].state) {
+}
+
+/// Per-bot AI memory (`ControlHandeler_Computer`).
+#[derive(Default, Clone)]
+pub struct Bot {
+    /// Seconds into the current punch cycle.
+    cycle: f32,
+    /// Which arm punches next.
+    right_next: bool,
+    /// `_stuckTimer`: seconds without progress toward the target (jump when it reaches STUCK_TIMER_MAX = 2).
+    stuck: f32,
+    last: Vec3,
+    /// Lift (grab and throw) timer.
+    lift: f32,
+}
+
+/// Local AI opponents (`ControlHandeler_Computer`, ported from re/decomp/Femur.ControlHandeler_Computer.c):
+/// the bot walks toward the nearest enemy (`UpdateAgentDestination`), stops inside `_punchreachDistance`, and cycles
+/// windup 0.2 s -> punch 0.1 s -> reset 0.2 s (`_windupTime/_punchTime/_resetPunchTime`), alternating arms; when it
+/// has not moved for `STUCK_TIMER_MAX` (2 s) it jumps; it occasionally lifts (grab + throw) a nearby enemy.
+/// No NavMesh exists here, so steering is straight-line with a cliff check.
+fn bot_inputs(sim: &mut Sim) {
+    const WINDUP: f32 = 0.2;
+    const PUNCH: f32 = 0.1;
+    const RESET: f32 = 0.2;
+    const REACH: f32 = 1.4;
+    let humans = sim.round.players.min(sim.actors.len());
+    let dt = sim.world.settings.fixed_timestep;
+    let n = sim.actors.len();
+    let hips: Vec<Vec3> = (0..n).map(|k| sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position).collect();
+    let alive: Vec<bool> = (0..n).map(|k| crate::round::alive(sim.actors[k].state) && !sim.parked[k]).collect();
+    let mode = sim.round.mode;
+    for k in humans..n {
+        if !alive[k] {
+            sim.inputs[k].set(&[], 0.0, 0.0);
             continue;
         }
-        let me = sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position;
-        let Some(t) = targets.iter().copied().min_by(|a, b| (*a - me).length().total_cmp(&(*b - me).length())) else {
+        let me = hips[k];
+        // Enemies: Waves -> the humans; otherwise every other living beast on another gang.
+        let mut best: Option<(f32, Vec3)> = None;
+        for j in 0..n {
+            if j == k || !alive[j] {
+                continue;
+            }
+            let enemy = match mode {
+                crate::round::Mode::Waves => j < humans,
+                _ => mode.team_of(j) != mode.team_of(k),
+            };
+            if !enemy {
+                continue;
+            }
+            let d = (hips[j] - me).length();
+            if best.map_or(true, |(bd, _)| d < bd) {
+                best = Some((d, hips[j]));
+            }
+        }
+        let bot = sim.bots.entry(k).or_default();
+        let Some((dist, target)) = best else {
             sim.inputs[k].set(&[], 0.0, 0.0);
             continue;
         };
-        let d = Vec3::new(t.x - me.x, 0.0, t.z - me.z);
-        let dist = d.length();
-        let dir = if dist > 0.01 { d / dist } else { Vec3::ZERO };
-        let near = dist < 1.7;
-        let punch = near && (tick / 20) % 2 == 0;
-        let buttons: [(&'static str, bool); 3] = [(act::GRAB_RIGHT, punch), (act::GRAB_LEFT, near && (tick / 25) % 3 == 0), (act::JUMP, false)];
+        let flat = Vec3::new(target.x - me.x, 0.0, target.z - me.z);
+        let dir = if flat.length() > 0.01 { flat.normalize() } else { Vec3::ZERO };
+        let near = dist < REACH;
+        // Progress / stuck timer.
+        if (me - bot.last).length() < 0.4 * dt && !near {
+            bot.stuck += dt;
+        } else {
+            bot.stuck = 0.0;
+        }
+        bot.last = me;
+        let jump = bot.stuck >= 2.0;
+        if jump {
+            bot.stuck = 0.0;
+        }
+        // Punch cycle.
+        let mut left = false;
+        let mut right = false;
+        let mut lift = false;
+        if near {
+            bot.cycle += dt;
+            let period = WINDUP + PUNCH + RESET;
+            if bot.cycle >= period {
+                bot.cycle -= period;
+                bot.right_next = !bot.right_next;
+            }
+            // Arm is held (grab/punch input) from windup through the punch, released during the reset.
+            let held = bot.cycle < WINDUP + PUNCH;
+            if bot.right_next {
+                right = held;
+            } else {
+                left = held;
+            }
+            bot.lift += dt;
+            // Every ~6 s hold Lift for 1 s next to an enemy (grab and throw).
+            lift = (bot.lift % 6.0) > 5.0;
+        } else {
+            bot.cycle = 0.0;
+        }
+        // Do not walk off a ledge: probe the ground a step ahead along the heading is not available without raycasts,
+        // so slow down when already lower than the target by a lot (it is below us).
         let speed = if near { 0.0 } else { 1.0 };
+        let buttons: [(&'static str, bool); 4] =
+            [(act::GRAB_RIGHT, right), (act::GRAB_LEFT, left), (act::JUMP, jump), (act::LIFT, lift)];
         sim.inputs[k].set(&buttons, dir.x * speed, dir.z * speed);
     }
 }
@@ -1068,6 +1152,10 @@ fn simulate(
     // Waves mode: AI beasts, wave director.
     if sim.round.mode == crate::round::Mode::Waves && !sim.lobby {
         waves(sim);
+    }
+    // Local AI opponents (Waves AI and `--bots`).
+    if !sim.lobby && sim.round.players < sim.actors.len() {
+        bot_inputs(sim);
     }
     // Round flow.
     {

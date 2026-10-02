@@ -77,6 +77,8 @@ pub struct Menu {
     /// Selected stage index (lobby left/right on the stage row).
     stage_index: usize,
     mode: crate::round::Mode,
+    /// Local AI opponents added to the match (B in the lobby).
+    bots: usize,
     item_keys: HashMap<usize, String>,
     root: PathBuf,
     dirty: bool,
@@ -567,6 +569,7 @@ fn setup(
             };
             hint("<  >  COLOUR   Q/E", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.42), 40.0);
             hint("Z X  COSTUME   SHIFT <  >", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.34), 40.0);
+            hint("B  AI PLAYERS", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.26), 40.0);
             hint("SUBMIT", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.40), 40.0);
             hint("BACK", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.46), 40.0);
         }
@@ -782,6 +785,7 @@ fn setup(
         wins: 3,
         stage_index: stages.iter().position(|s| s == "rooftop").unwrap_or(0),
         mode: crate::round::Mode::from_id(&std::env::var("GB_MODE").unwrap_or_default()),
+        bots: std::env::var("GB_BOTS").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
         stages,
         palette,
         player_color: env_index("GB_COLOUR", 0).min(palette_len.saturating_sub(1)),
@@ -1480,6 +1484,10 @@ fn input(
             menu.dirty = true;
         }
     }
+    if menu.current == LOBBY && keys.just_pressed(KeyCode::KeyB) {
+        menu.bots = (menu.bots + 1) % 6;
+        menu.dirty = true;
+    }
     let mut costume_delta: isize = 0;
     if menu.current == LOBBY && (lobby_left || lobby_right) && key != "MENU_WINS" && key != "MENU_STAGE" && key != "MENU_GAME_MODE" {
         // Shift + left/right cycles the costume preset (plain left/right is the colour now).
@@ -1601,6 +1609,8 @@ fn input(
                         menu.wins.to_string(),
                         "--mode".into(),
                         menu.mode.id().into(),
+                        "--bots".into(),
+                        menu.bots.to_string(),
                         "--player-color".into(),
                         menu.player_color.to_string(),
                         // The lobby's chosen costume must follow into the match, or the player
@@ -1829,7 +1839,7 @@ fn layout(
                 if crate::round::Mode::ALL.iter().any(|m| m.label() == t.text)
                     || t.text == "Soccer" || t.text == "Waves" =>
             {
-                Some(menu.mode.label().to_string())
+                Some(if menu.bots > 0 { format!("{} +{} AI", menu.mode.label(), menu.bots) } else { menu.mode.label().to_string() })
             }
             Some("MENU_STAGE") if t.text == "Random" => Some(
                 menu.stages

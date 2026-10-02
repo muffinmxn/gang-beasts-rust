@@ -47,6 +47,7 @@ fn run() -> Result<(), String> {
     let mut menu_mode = false;
     let mut spawn_index = 3usize;
     let mut players = 1usize;
+    let mut bots = std::env::var("GB_BOTS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
     let mut wins = round::WINS_TO_WIN;
     let mut player_color = 0usize;
     let mut root = std::env::var_os("GB_ASSET_ROOT").map(PathBuf::from);
@@ -74,6 +75,9 @@ fn run() -> Result<(), String> {
                     .ok_or("--players requires a count")?
                     .parse()
                     .map_err(|_| "invalid player count")?
+            }
+            "--bots" => {
+                bots = args.next().ok_or("--bots requires a count")?.parse().map_err(|_| "invalid bot count")?;
             }
             "--wins" => {
                 wins = args
@@ -107,6 +111,8 @@ fn run() -> Result<(), String> {
             _ => stage_name = arg,
         }
     }
+    let humans = players;
+    let players = (players + bots).min(10);
     menu_mode |= stage_name == "menu";
     if menu_mode {
         stage_name = "menu".into();
@@ -270,7 +276,7 @@ fn run() -> Result<(), String> {
     let sim = if menu_mode {
         // Menu Alley lobby: the scene is live physics; beasts join from the lobby screen.
         let mut sim = play::build(&root, &stage_name, spawns.clone(), 0, 0, wins, player_color)?;
-        sim.round.players = players;
+        sim.round.players = humans;
         sim.lobby = true;
         // No rounds in the lobby: keep the round-start fade from covering the menu.
         sim.round.round_time = 1.0e6;
@@ -287,7 +293,7 @@ fn run() -> Result<(), String> {
             wins,
             player_color,
         )?;
-        built.round.players = players;
+        built.round.players = humans;
         Some(built)
     };
     let mut app = App::new();
