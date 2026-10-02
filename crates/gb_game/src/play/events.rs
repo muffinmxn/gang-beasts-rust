@@ -74,6 +74,33 @@ struct Wheel {
     max_speed: f32,
 }
 
+/// Train stage escalation (`TrackPool.startEscalationRange` 30-120 s, `escalationDurationRange` 120 s): a landslide
+/// rains boulders from `landSlideBoulderSpawns` onto the cliff track.
+struct Boulders {
+    spawns: Vec<Entity>,
+    items: Vec<PropItem>,
+    start: f32,
+    end: f32,
+    next: f32,
+}
+
+/// `SharkActor` (simplified): a pooled ragdoll lurks 40 m down; every 25-60 s it hunts a beast near the water: it is
+/// moved under it and launched up in a breach, then returns to the deep.
+struct Shark {
+    bodies: Vec<(usize, Iso)>,
+    root: Vec3,
+    next: f32,
+    phase_until: f32,
+    active: bool,
+}
+
+/// `Trawler_Mechanics.sinking` / `sinkDelay` (150 s): the hull rolls over and goes down.
+struct Capsize {
+    hull: usize,
+    pose: Iso,
+    start: f32,
+}
+
 /// `FanController` + `PushVolume` (Vents' turbine): the fan cycles off (`FanDisabledTime`) -> wind-up -> spin
 /// (`FanSpinTime`); while it spins everything inside its push volume is thrown upward.
 struct Fan {
@@ -205,6 +232,10 @@ pub struct StageEvents {
     track: Option<Track>,
     lifts: Vec<Lift>,
     fans: Vec<Fan>,
+    time: f32,
+    boulders: Option<Boulders>,
+    sharks: Vec<Shark>,
+    capsize: Option<Capsize>,
     /// `Liquid` surface heights (Unity y) of the stage.
     water_level: Option<f32>,
     rng: u32,
@@ -304,6 +335,103 @@ pub fn stage_events(
         let turn = Quat::from_rotation_z((w.speed * dt).to_radians());
         w.pose = Iso::new(w.pose.position, (w.pose.rotation * turn).normalize());
         sim.world.move_kinematic(w.body, w.pose);
+    }
+    state.time += dt * std::env::var("GB_EVENT_TIME_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
+    let now = state.time;
+    // Landslide boulders.
+    if state.boulders.is_some() {
+        let rr = [state.rand01(), state.rand01(), state.rand01()];
+        let b = state.boulders.as_mut().unwrap();
+        for item in &mut b.items {
+            if item.live {
+                item.age += dt;
+            }
+        }
+        if now >= b.start && now <= b.end && now >= b.next && !b.spawns.is_empty() {
+            if let Some(ii) = b.items.iter().position(|i| !i.live) {
+                let sp = b.spawns[(rr[0] * b.spawns.len() as f32) as usize % b.spawns.len()];
+                if let Ok(g) = globals.get(sp) {
+                    let pos = mirror_position(g.translation()) + Vec3::new((rr[1] - 0.5) * 6.0, 0.0, (rr[2] - 0.5) * 6.0);
+                    let item = &mut b.items[ii];
+                    for (body, rest) in &item.bodies {
+                        sim.world.restore_body(*body);
+                        sim.world.teleport(*body, Iso::new(pos + (rest.position - item.root_pos), rest.rotation));
+                    }
+                    item.live = true;
+                    item.age = 0.0;
+                    if let Ok(mut v) = visibility.get_mut(item.entity) {
+                        *v = Visibility::Visible;
+                    }
+                    info!("landslide boulder at {pos:?}");
+                }
+            }
+            b.next = now + 2.0 + rr[1] * 3.0;
+        }
+        for item in &mut b.items {
+            let lowest = item.bodies.iter().map(|(bd, _)| sim.world.pose(*bd).position.y).fold(f32::MAX, f32::min);
+            if item.live && (item.age > 40.0 || lowest < -80.0) {
+                for (bd, _) in &item.bodies {
+                    sim.world.set_linear_velocity(*bd, Vec3::ZERO);
+                    sim.world.remove_body(*bd);
+                }
+                item.live = false;
+                if let Ok(mut v) = visibility.get_mut(item.entity) {
+                    *v = Visibility::Hidden;
+                }
+            }
+        }
+    }
+    // Sharks.
+    if !state.sharks.is_empty() {
+        let level = state.water_level.unwrap_or(0.0);
+        let mut targets: Vec<Vec3> = Vec::new();
+        for (k, a) in sim.actors.iter().enumerate() {
+            if sim.parked.get(k).copied().unwrap_or(false) || !crate::round::alive(a.state) {
+                continue;
+            }
+            targets.push(sim.world.pose(a.beast.body(Part::Hips)).position);
+        }
+        for i in 0..state.sharks.len() {
+            let r = [state.rand01(), state.rand01()];
+            let sh = &mut state.sharks[i];
+            if !sh.active && now >= sh.next && !targets.is_empty() {
+                let t = targets[(r[0] * targets.len() as f32) as usize % targets.len()];
+                if t.y < level + 8.0 {
+                    sh.active = true;
+                    sh.phase_until = now + 7.0;
+                    let centre = sh.bodies.first().map(|(_, p)| p.position).unwrap_or(sh.root);
+                    for (b, rest) in &sh.bodies {
+                        let off = rest.position - centre;
+                        sim.world.restore_body(*b);
+                        sim.world.teleport(*b, Iso::new(Vec3::new(t.x, level - 3.0, t.z) + off, Quat::from_rotation_x(-0.5)));
+                        sim.world.set_use_gravity(*b, true);
+                        sim.world.set_linear_velocity(*b, Vec3::new(0.0, 13.0, 0.0));
+                    }
+                    info!("shark breaches at {t:?}");
+                } else {
+                    sh.next = now + 5.0;
+                }
+            }
+            if sh.active && now >= sh.phase_until {
+                for (b, rest) in &sh.bodies {
+                    sim.world.set_linear_velocity(*b, Vec3::ZERO);
+                    sim.world.teleport(*b, *rest);
+                    sim.world.set_use_gravity(*b, false);
+                }
+                sh.active = false;
+                sh.next = now + 25.0 + r[1] * 35.0;
+            }
+        }
+    }
+    // Trawler capsize.
+    if let Some(c) = &mut state.capsize {
+        if now > c.start {
+            let t = (now - c.start).min(60.0);
+            let roll = (t / 60.0).powf(1.5) * 1.1;
+            let sink = t * 0.1;
+            let rot = Quat::from_rotation_z(roll) * c.pose.rotation;
+            sim.world.move_kinematic(c.hull, Iso::new(c.pose.position - Vec3::Y * sink, rot));
+        }
     }
     // Fans.
     for f in &mut state.fans {
@@ -873,6 +1001,100 @@ fn init(
     }
     if !state.fans.is_empty() {
         info!("stage events: {} fan(s)", state.fans.len());
+    }
+    // Train landslide.
+    if let Some(tp) = nodes.iter().find_map(|n| script_of(n, "TrackPool")) {
+        let inst = sim.scenes[0].0;
+        let spawns: Vec<Entity> = tp["landSlideBoulderSpawns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["node"].as_u64())
+            .filter_map(|n| map.0.get(&(0, n as usize)).copied())
+            .collect();
+        let mut items = Vec::new();
+        let poses_b = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
+        for pool in tp["boulderPool"].as_array().into_iter().flatten() {
+            let Some(pn) = pool["node"].as_u64().map(|n| n as usize) else { continue };
+            let Some(pd) = script_of(&nodes[pn], "Pool") else { continue };
+            for p in pd["_Pool"].as_array().into_iter().flatten() {
+                let Some(n) = p["node"].as_u64().map(|n| n as usize) else { continue };
+                let mut bodies = Vec::new();
+                for (j, _) in nodes.iter().enumerate() {
+                    let mut cur = Some(j);
+                    let mut under = false;
+                    while let Some(c) = cur {
+                        if c == n {
+                            under = true;
+                            break;
+                        }
+                        cur = nodes[c].parent;
+                    }
+                    if under {
+                        if let Some(&b) = sim.world.instances[inst].bodies.get(&j) {
+                            bodies.push((b, sim.world.pose(b)));
+                        }
+                    }
+                }
+                if let (false, Some(&e)) = (bodies.is_empty(), map.0.get(&(0, n))) {
+                    items.push(PropItem { entity: e, bodies, root_pos: poses_b[n].position, live: false, age: 0.0 });
+                }
+            }
+        }
+        if !items.is_empty() && !spawns.is_empty() {
+            let lo = tp["startEscalationRange"]["x"].as_f64().unwrap_or(30.0) as f32;
+            let hi = tp["startEscalationRange"]["y"].as_f64().unwrap_or(120.0) as f32;
+            let dur = tp["escalationDurationRange"]["x"].as_f64().unwrap_or(120.0) as f32;
+            let start = lo + state.rand01() * (hi - lo);
+            info!("stage events: landslide in {start:.0}s for {dur:.0}s ({} boulders)", items.len());
+            state.boulders = Some(Boulders { spawns, items, start, end: start + dur, next: 0.0 });
+        }
+    }
+    // Sharks and the Trawler capsize.
+    {
+        let inst = sim.scenes[0].0;
+        let poses_s = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
+        for (i, node) in nodes.iter().enumerate() {
+            let Some(shark) = script_of(node, "SharkActor") else { continue };
+            let mut bodies = Vec::new();
+            for (j, _) in nodes.iter().enumerate() {
+                let mut cur = Some(j);
+                let mut under = false;
+                while let Some(c) = cur {
+                    if c == i {
+                        under = true;
+                        break;
+                    }
+                    cur = nodes[c].parent;
+                }
+                if under {
+                    if let Some(&b) = sim.world.instances[inst].bodies.get(&j) {
+                        bodies.push((b, sim.world.pose(b)));
+                    }
+                }
+            }
+            if bodies.is_empty() {
+                continue;
+            }
+            for (b, _) in &bodies {
+                sim.world.set_use_gravity(*b, false);
+            }
+            let delay = shark["startDelay"].as_f64().unwrap_or(60.0) as f32;
+            let r = state.rand01();
+            state.sharks.push(Shark { bodies, root: poses_s[i].position, next: 20.0 + delay * 0.5 + r * 20.0, phase_until: 0.0, active: false });
+        }
+        if !state.sharks.is_empty() {
+            info!("stage events: {} shark(s)", state.sharks.len());
+        }
+        if let Some(d) = nodes.iter().find_map(|n| script_of(n, "Trawler_Mechanics")) {
+            if let Some(h) = d["trawlerHull"]["node"].as_u64() {
+                if let Some(&hull) = sim.world.instances[inst].bodies.get(&(h as usize)) {
+                    let delay = d["sinkDelay"].as_f64().unwrap_or(150.0) as f32;
+                    state.capsize = Some(Capsize { hull, pose: sim.world.pose(hull), start: delay });
+                    info!("stage events: trawler capsizes after {delay}s");
+                }
+            }
+        }
     }
     // Elevator cars become kinematic shuttles.
     for node in nodes.iter() {
