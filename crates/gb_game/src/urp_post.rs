@@ -1,6 +1,7 @@
 //! URP 12 post colour pipeline (postExposure, ACEScc contrast, saturation, reference ACES
 //! tonemap) as a Bevy render-graph pass after the (disabled) Bevy tonemapper. Put [`UrpPost`] on a
 //! camera with `Tonemapping::None` and identity `ColorGrading`. Shader: shaders/urp_post.wgsl.
+#![allow(dead_code)] // ShaderType derive emits unused per-field helpers
 use bevy::{
     core_pipeline::{
         core_3d::graph::{Core3d, Node3d},

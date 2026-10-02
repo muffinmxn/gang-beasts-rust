@@ -1,5 +1,6 @@
 //! Water4 seas: Gerstner waves + animated wave normals on top of the tuned sea `StandardMaterial`
 //! (`ExtendedMaterial`). Parameters per sea come from `water-params.json` (tools/extract/water_params.py).
+#![allow(dead_code)] // ShaderType derive emits unused per-field helpers
 use bevy::{
     gltf::GltfMaterialName,
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},

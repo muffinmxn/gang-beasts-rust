@@ -126,6 +126,7 @@ impl Costumes {
 
 impl Costumes {
     /// New stage (in-process switch): actors are new, so dress them again.
+    #[allow(dead_code)]
     pub fn reset(&mut self, choice: Option<String>) {
         self.applied.clear();
         if choice.is_some() {

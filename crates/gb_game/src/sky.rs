@@ -19,6 +19,7 @@ pub struct SurfaceFog {    pub sky: Color,
     pub sky_max_depth: f32,
     pub sky_elevation: f32,
     pub ground_max_depth: f32,
+    #[allow(dead_code)] // read by the exact fog pass, kept for parity with the settings
     pub ground_elevation: f32,
     /// fogLightScatterIntensity: fog brightens toward the sun.
     pub scatter: f32,

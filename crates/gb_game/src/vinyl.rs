@@ -1,5 +1,6 @@
 //! Menu-scoped port of the source VinylOrMetal material graph.
 //! Register provenance and remaining lighting work: re/shaders/VINYL_PORT.md.
+#![allow(dead_code)] // ShaderType derive emits unused per-field helpers
 use bevy::{gltf::GltfMaterialExtras, pbr::{ExtendedMaterial, MaterialExtension}, prelude::*,
     render::render_resource::{AsBindGroup, ShaderRef, ShaderType}, scene::{SceneInstance, SceneSpawner}};
 use serde_json::Value;

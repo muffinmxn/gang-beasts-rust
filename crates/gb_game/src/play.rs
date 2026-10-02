@@ -272,12 +272,6 @@ impl Sim {
         self.player_colors[(self.player_color_start + k) % self.player_colors.len().max(1)]
     }
 
-    /// First local player's palette colour, if the palette loaded. Used for costume tint when
-    /// there is no menu (a stage launch), where `menu.selected_color()` is unavailable.
-    pub fn default_color(&self) -> Option<Color> {
-        (!self.player_colors.is_empty()).then(|| self.player_color(0))
-    }
-
     /// GameManagerNew reloads the level between rounds: put every stage body back where it
     /// started, restore shattered glass, clear shards and respawn every beast.
     fn reload_stage(&mut self) {

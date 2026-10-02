@@ -3,6 +3,7 @@ mod costume;
 mod unseen;
 mod devgui;
 mod fracture;
+#[allow(dead_code)] // opt-in experimental engine (GB_ENGINE=1)
 mod gb_engine;
 mod light_probes;
 mod urp_post;

@@ -115,6 +115,7 @@ pub struct Round {
 }
 
 impl Round {
+    #[cfg(test)]
     pub fn new(colour_names: Vec<String>) -> Self {
         Self::with_wins(colour_names, WINS_TO_WIN)
     }
