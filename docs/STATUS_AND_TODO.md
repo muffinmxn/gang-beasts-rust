@@ -88,7 +88,7 @@ See the "Audio" section in `README.md` for extraction. Status of each part is tr
   shark bite / jaw / splash, cable snaps, glass breaking, water splashes.
 - [ ] Verify real playback on a machine with an audio device (developed headless: the clip selection is logged with
   `GB_AUDIO_DEBUG=1`, loudness values are estimates).
-- [ ] Music: B side, drums by intensity, warp stingers, round-flow transitions (`MusicController`), pause music.
+- [~] Music: A/B side per round and drums when two or fewer fight are in. Missing: warp stingers, crossfades, round-flow transitions (`MusicController`), pause music.
 - [ ] Positional (3D) sources for ambient loops, doppler, mixer groups and snapshots from the AudioMixer assets.
 - [ ] Voices: emotes, laughs, snore loop; tentacles, trawler groans, bulb pops, train / crane / elevator / wheel loops,
   countdown voice (`AudioDatabase`), `SoundOnTriggerEnter` / `PlaySoundOnJointBreak` stage sounds.

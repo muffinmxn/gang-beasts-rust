@@ -201,12 +201,21 @@ fn music(
         key = "menu".to_string();
         layers.push(("GB Days Anthem".into(), 0.15));
     } else if let Some(sim) = sim {
-        key = sim.stage_name.clone();
-        if let Ok(b) = std::fs::read(lib.root.join(format!("audio-{key}.json"))) {
+        // Even rounds play the A side, odd rounds the B side; the drums join when the fight narrows to two.
+        let rounds: u32 = sim.round.wins.iter().sum();
+        let alive = sim.actors.iter().enumerate().filter(|(k, a)| crate::round::alive(a.state) && !sim.parked.get(*k).copied().unwrap_or(false)).count();
+        let b_side = rounds % 2 == 1;
+        let drums = alive <= 2 && sim.actors.len() > 2;
+        key = format!("{}:{}:{}", sim.stage_name, b_side, drums);
+        let stage = sim.stage_name.clone();
+        if let Ok(b) = std::fs::read(lib.root.join(format!("audio-{stage}.json"))) {
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
                 if let Some(music) = v["music"].as_object().and_then(|m| m.values().next()) {
-                    if let Some(c) = music["aSide"].as_str() {
+                    if let Some(c) = music[if b_side { "bSide" } else { "aSide" }].as_str().or(music["aSide"].as_str()) {
                         layers.push((c.to_string(), 0.18));
+                    }
+                    if let (true, Some(c)) = (drums, music["drums"].as_str()) {
+                        layers.push((c.to_string(), 0.16));
                     }
                     if let Some(c) = music["ambience"].as_str() {
                         layers.push((c.to_string(), 0.3));
