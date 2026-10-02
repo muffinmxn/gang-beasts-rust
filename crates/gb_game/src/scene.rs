@@ -441,6 +441,19 @@ impl SceneData {
                 return melee;
             }
             if !found.is_empty() {
+                // Too few melee markers (Trucks has 2, one per truck): add the stage's gang markers, which sit on the
+                // same platforms, so every fighter starts on a truck deck instead of being fanned out onto the road.
+                if found.len() < 4 && script != "GBGangSpawnPoint" {
+                    let mut more = found.clone();
+                    for (i, n) in self.nodes.iter().enumerate() {
+                        if n.active_in_hierarchy
+                            && n.components.iter().any(|c| c.script.as_deref() == Some("GBGangSpawnPoint"))
+                        {
+                            more.push(world[i].compute_transform());
+                        }
+                    }
+                    return more;
+                }
                 return found;
             }
         }

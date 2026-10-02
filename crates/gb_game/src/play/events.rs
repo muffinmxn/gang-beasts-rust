@@ -232,6 +232,9 @@ pub struct StageEvents {
     track: Option<Track>,
     lifts: Vec<Lift>,
     fans: Vec<Fan>,
+    /// (material name prefix, colour) chosen by ContainerTinter, applied by `apply_container_tints`.
+    pub container_tints: Vec<(String, Color)>,
+    tints_applied: bool,
     time: f32,
     boulders: Option<Boulders>,
     sharks: Vec<Shark>,
@@ -284,6 +287,10 @@ pub fn stage_events(
     mut transforms: Query<&mut Transform>,
     globals: Query<&GlobalTransform>,
     mut visibility: Query<&mut Visibility>,
+    mat_query: Query<(&MeshMaterial3d<StandardMaterial>, &bevy::gltf::GltfMaterialName)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    vinyl_query: Query<(&MeshMaterial3d<crate::vinyl::VinylMaterial>, &bevy::gltf::GltfMaterialName)>,
+    mut vinyl: ResMut<Assets<crate::vinyl::VinylMaterial>>,
 ) {
     if sim.lobby {
         return;
@@ -301,6 +308,11 @@ pub fn stage_events(
         state.ready = true;
         init(&mut sim, &map, &mut state, &mut visibility, &mut transforms);
     }
+    let named_materials: Vec<(Handle<StandardMaterial>, String)> = if !state.tints_applied && !state.container_tints.is_empty() && vinyl_query.iter().next().is_some() {
+        mat_query.iter().map(|(h, n)| (h.0.clone(), n.0.clone())).collect()
+    } else {
+        Vec::new()
+    };
     let dt = time.delta_secs().min(0.1);
     let alpha = fixed.overstep_fraction() * fixed.timestep().as_secs_f32();
     let points = actor_points(&sim);
@@ -432,6 +444,29 @@ pub fn stage_events(
             let rot = Quat::from_rotation_z(roll) * c.pose.rotation;
             sim.world.move_kinematic(c.hull, Iso::new(c.pose.position - Vec3::Y * sink, rot));
         }
+    }
+    // Wait until the stage's materials have been swapped to the vinyl shader (a few frames after load).
+    if !state.tints_applied && !state.container_tints.is_empty() && vinyl_query.iter().next().is_some() {
+        state.tints_applied = true;
+        for (prefix, colour) in &state.container_tints {
+            for (h, n) in &vinyl_query {
+                if n.0.starts_with(prefix.as_str()) {
+                    if let Some(m) = vinyl.get_mut(&h.0) {
+                        m.base.base_color = *colour;
+                    }
+                }
+            }
+        }
+        for (prefix, colour) in &state.container_tints {
+            for (handle, name) in &named_materials {
+                if name.starts_with(prefix.as_str()) {
+                    if let Some(m) = materials.get_mut(handle) {
+                        m.base_color = *colour;
+                    }
+                }
+            }
+        }
+        info!("stage events: tinted {} container colour(s)", state.container_tints.len());
     }
     // Fans.
     for f in &mut state.fans {
@@ -1284,6 +1319,25 @@ fn init(
                 open: false,
             });
         }
+    }
+    // ContainerTinter (Trucks/Train): each tinter picks one of its `colors` per match and sets it on materialA and
+    // materialB. The exporter names those "Container A/B/C Shade A/B"; tinter k drives container letter k.
+    let tinters: Vec<Vec<Color>> = nodes
+        .iter()
+        .flat_map(|n| n.components.iter().filter(|c| c.script.as_deref() == Some("ContainerTinter")))
+        .map(|c| {
+            c.data["colors"].as_array().into_iter().flatten().map(|v| {
+                let f = |k: &str| v[k].as_f64().unwrap_or(1.0) as f32;
+                Color::srgb(f("r"), f("g"), f("b"))
+            }).collect()
+        })
+        .collect();
+    for (k, palette) in tinters.iter().enumerate() {
+        if palette.is_empty() {
+            continue;
+        }
+        let pick = palette[(state.rand01() * palette.len() as f32) as usize % palette.len()];
+        state.container_tints.push((format!("Container {} Shade", (b'A' + k as u8) as char), pick));
     }
     // TruckWheels: both wheels spin about their local X at `speed` deg/s (4000 = 40 m/s road on 0.6 m wheels).
     for node in nodes.iter() {
