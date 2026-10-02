@@ -1661,6 +1661,23 @@ fn map_nodes(
                     }
                 }
             }
+            // Incinerator fire: `Shader Graphs/PitFire_custom` and `GangBeasts/Effects/Fire Glow` are unported effect
+            // shaders (flames + additive glow card). Stand-in: bright emissive orange, the glow card translucent.
+            if meshes.contains(e) {
+                let fire = material_names.get(e).ok().map(|n| n.0.clone()).filter(|n| n == "PitFire_custom" || n == "Firepit Glow");
+                if let Some(name) = fire {
+                    if let Ok(mut h) = mesh_materials.get_mut(e) {
+                        let glow = name == "Firepit Glow";
+                        h.0 = materials.add(StandardMaterial {
+                            base_color: if glow { Color::srgba(1.0, 0.45, 0.05, 0.55) } else { Color::srgb(1.0, 0.55, 0.1) },
+                            emissive: if glow { LinearRgba::rgb(4.0, 0.9, 0.0) } else { LinearRgba::rgb(6.0, 1.8, 0.1) },
+                            unlit: false,
+                            alpha_mode: if glow { AlphaMode::Add } else { AlphaMode::Opaque },
+                            ..default()
+                        });
+                    }
+                }
+            }
             let Ok(x) = extras.get(e) else { continue };
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&x.value) {
                 if let Some(n) = v["gb_node"].as_u64() {
