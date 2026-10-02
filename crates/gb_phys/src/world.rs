@@ -1090,6 +1090,14 @@ impl World {
                 );
                 if kinematic {
                     PxRigidBody_setRigidBodyFlag_mut(body, PxRigidBodyFlag::eKINEMATIC, true);
+                } else {
+                    // Rigidbody.collisionDetectionMode: Continuous (1) / ContinuousDynamic (2) -> CCD,
+                    // ContinuousSpeculative (3) -> speculative CCD; Discrete (0) -> none.
+                    match d["m_CollisionDetection"].as_u64().unwrap_or(0) {
+                        1 | 2 => PxRigidBody_setRigidBodyFlag_mut(body, PxRigidBodyFlag::eENABLE_CCD, true),
+                        3 => PxRigidBody_setRigidBodyFlag_mut(body, PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true),
+                        _ => {}
+                    }
                 }
                 if !flag(&d["m_UseGravity"]) {
                     PxActor_setActorFlag_mut(
