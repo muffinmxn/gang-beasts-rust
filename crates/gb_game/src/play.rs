@@ -583,6 +583,37 @@ pub fn build(
     {
         sim.cam_index = index;
     }
+    // Trucks: beasts start on the truck decks (TruckBase bodies), spread over the trucks.
+    let inst = sim.scenes[0].0;
+    let mut decks: Vec<(f32, Vec3)> = vec![];
+    for (i, n) in sim.scenes[0].1.nodes.iter().enumerate() {
+        if !n.components.iter().any(|c| c.script.as_deref() == Some("TruckBase")) {
+            continue;
+        }
+        let Some(&body) = sim.world.instances[inst].bodies.get(&i) else { continue };
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for (k, c) in sim.world.colliders.iter().enumerate() {
+            if c.body == Some(body) && !c.trigger {
+                let (centre, ext) = sim.world.collider_bounds(k);
+                lo = lo.min(centre - ext);
+                hi = hi.max(centre + ext);
+            }
+        }
+        if lo.x <= hi.x {
+            decks.push((hi.y, (lo + hi) * 0.5));
+        }
+    }
+    if !decks.is_empty() {
+        let slots = [(0.0, 0.0), (0.7, 0.0), (-0.7, 0.0), (0.0, 0.8), (0.0, -0.8), (0.7, 0.8), (-0.7, 0.8), (-0.7, -0.8)];
+        let mut points = vec![];
+        for (dx, dz) in slots {
+            for (top, centre) in &decks {
+                points.push(Transform::from_translation(mirror_position(Vec3::new(centre.x + dx, top + 0.6, centre.z + dz))));
+            }
+        }
+        println!("trucks: {} deck spawn(s) on {} truck(s), first {:?}", points.len(), decks.len(), decks.first());
+        sim.spawn_points = points;
+    }
     if players > 0 {
         let at = sim.spawn_points[first % sim.spawn_points.len()];
         sim.spawn_beast(at)?;
@@ -629,37 +660,6 @@ pub fn build(
         } else {
             println!("soccer: this stage has no FootballGoals (play it on Alley)");
         }
-    }
-    // Trucks: beasts start on the truck decks (TruckBase bodies), spread over the trucks.
-    let inst = sim.scenes[0].0;
-    let mut decks: Vec<(f32, Vec3)> = vec![];
-    for (i, n) in sim.scenes[0].1.nodes.iter().enumerate() {
-        if !n.components.iter().any(|c| c.script.as_deref() == Some("TruckBase")) {
-            continue;
-        }
-        let Some(&body) = sim.world.instances[inst].bodies.get(&i) else { continue };
-        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-        for (k, c) in sim.world.colliders.iter().enumerate() {
-            if c.body == Some(body) && !c.trigger {
-                let (centre, ext) = sim.world.collider_bounds(k);
-                lo = lo.min(centre - ext);
-                hi = hi.max(centre + ext);
-            }
-        }
-        if lo.x <= hi.x {
-            decks.push((hi.y, (lo + hi) * 0.5));
-        }
-    }
-    if !decks.is_empty() {
-        let slots = [(0.0, 0.0), (0.7, 0.0), (-0.7, 0.0), (0.0, 0.8), (0.0, -0.8), (0.7, 0.8), (-0.7, 0.8), (-0.7, -0.8)];
-        let mut points = vec![];
-        for (dx, dz) in slots {
-            for (top, centre) in &decks {
-                points.push(Transform::from_translation(mirror_position(Vec3::new(centre.x + dx, top + 0.6, centre.z + dz))));
-            }
-        }
-        println!("trucks: {} deck spawn(s) on {} truck(s), first {:?}", points.len(), decks.len(), decks.first());
-        sim.spawn_points = points;
     }
     Ok(sim)
 }
@@ -747,6 +747,7 @@ pub fn plugin(app: &mut App) {
                 update_hud,
                 crate::round::update_ui,
                 mode_hud,
+                waves_to_menu,
             )
                 .chain(),
         );
@@ -997,7 +998,7 @@ fn rumble(sim: &mut Sim) {
 /// The game's `WavesData` "Default" asset (core-globalassets): four waves of 1, 2, 3 and 4 beasts; wave 1 is a fire
 /// fighter, wave 2 riot police, the rest wear the fallback costumes. Surviving every wave wins the match.
 /// (costume, beast type): type 0 normal, 1 Big (`beastTypePref[1]`), 2 Tiny. Wave 2 is a normal and a Big riot cop.
-const WAVES: [&[(&str, u8)]; 4] = [&[("Firefighter_01", 0)], &[("Riot", 0), ("Riot", 1)], &[("", 0), ("", 0), ("", 0)], &[("", 0), ("", 0), ("", 0), ("", 0)]];
+const WAVES: [&[(&str, u8)]; 4] = [&[("Firefighter_01", 0)], &[("Riot", 0), ("Riot", 1)], &[("", 0), ("", 0), ("", 2)], &[("", 0), ("", 1), ("", 2), ("", 2)]];
 const WAVE_FALLBACK_COSTUMES: [&str; 6] = ["OfficeShort", "OfficeLong_2", "BusinessSuit", "TIE", "Riot", "Firefighter_01"];
 
 /// Enemy entrances: every stage node under a "Waves" spawn group (`GBGangSpawnPoint` under `Spawns/WavesSpawnPoint`,
@@ -1041,7 +1042,7 @@ fn wave_entrances(sim: &Sim) -> Vec<Transform> {
             let at = if let Some(door) = door {
                 let dir = Vec3::new(door.x - base.position.x, 0.0, door.z - base.position.z).normalize_or_zero();
                 let side = Vec3::new(-dir.z, 0.0, dir.x);
-                Vec3::new(door.x, base.position.y, door.z) + dir * (1.2 - off.z) + side * off.x
+                Vec3::new(door.x, base.position.y, door.z) + dir * (0.2 - off.z * 0.5) + side * off.x
             } else {
                 base.position + base.rotation * off
             };
@@ -2879,4 +2880,37 @@ pad buttons: {}",
             Visibility::Hidden
         };
     }
+}
+
+/// Waves: when the run is over (everyone down, or all waves cleared) show the result for a few seconds, then go
+/// straight back to the main menu (no balloon/coin win screen).
+fn waves_to_menu(
+    sim: Option<NonSend<Sim>>,
+    time: Res<Time>,
+    mut shown: Local<f32>,
+    mut exit: EventWriter<AppExit>,
+) {
+    let Some(sim) = sim else { return };
+    if sim.lobby || sim.round.mode != crate::round::Mode::Waves || !sim.round.game_over {
+        *shown = 0.0;
+        return;
+    }
+    *shown += time.delta_secs();
+    if *shown < 4.0 {
+        return;
+    }
+    let mut args = vec!["--menu".to_string()];
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        if a == "--assets" {
+            if let Some(v) = it.next() {
+                args.push("--assets".into());
+                args.push(v);
+            }
+        }
+    }
+    if std::env::var_os("GB_NO_RETURN_TO_MENU").is_none() {
+        let _ = std::env::current_exe().map(|exe| std::process::Command::new(exe).args(&args).spawn());
+    }
+    exit.write(AppExit::Success);
 }

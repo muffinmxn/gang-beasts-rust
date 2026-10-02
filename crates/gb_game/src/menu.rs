@@ -215,7 +215,9 @@ fn setup(
                     .filter_map(|entry| {
                         let name = entry.file_name().to_string_lossy().into_owned();
                         let stem = name.strip_suffix(".glb")?;
-                        (root.0.join(format!("{stem}.json")).is_file()
+                        // Test-only exports the retail game never offers.
+                        (!matches!(stem, "chute" | "aquarium" | "menu" | "beast" | "beast_big" | "beast_tiny")
+                            && root.0.join(format!("{stem}.json")).is_file()
                             && root.0.join(format!("{stem}-graphics.json")).is_file())
                         .then(|| stem.to_string())
                     })
@@ -1951,7 +1953,7 @@ fn layout(
 fn stage_allowed(mode: crate::round::Mode, stage: &str) -> bool {
     use crate::round::Mode;
     match mode {
-        Mode::Waves => ["rooftop", "subway", "grind", "incinerator", "chute", "aquarium"].contains(&stage),
+        Mode::Waves => ["rooftop", "subway", "grind", "incinerator"].contains(&stage),
         Mode::Soccer => stage == "alley",
         Mode::Rumble => stage == "ring",
         _ => stage != "alley" && stage != "ring" || stage == "ring",

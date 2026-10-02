@@ -230,6 +230,7 @@ struct Truck {
 
 #[derive(Default)]
 pub struct StageEvents {
+    debug_road_bucket: u64,
     key: (usize, usize, u32),
     ready: bool,
     trains: Vec<Train>,
@@ -295,6 +296,8 @@ fn actor_points(sim: &Sim) -> Vec<(usize, Vec3)> {
     }
     out
 }
+
+static DEBUG_RELOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn stage_events(
     mut sim: NonSendMut<Sim>,
@@ -715,6 +718,19 @@ pub fn stage_events(
             let d = *speed * dt;
             let q = Quat::from_euler(EulerRot::ZXY, d.z.to_radians(), d.x.to_radians(), d.y.to_radians());
             tf.rotation = (tf.rotation * mirror_rotation(q)).normalize();
+        }
+    }
+    // Debug: GB_RELOAD_TEST=<step> reloads the stage once (exercises the between-rounds reset); GB_ROAD_DEBUG logs a tile.
+    if let Some(n) = std::env::var("GB_RELOAD_TEST").ok().and_then(|v| v.parse::<u64>().ok()) {
+        if sim.world.steps as u64 >= n && !DEBUG_RELOADED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            info!("debug: reload_stage");
+            sim.reload_stage();
+        }
+    }
+    if std::env::var_os("GB_ROAD_DEBUG").is_some() && sim.world.steps / 120 != state.debug_road_bucket {
+        state.debug_road_bucket = sim.world.steps / 120;
+        if let Some(r) = state.roads.first() {
+            info!("road[0] at step {}: {:?} -> {:?}", sim.world.steps, sim.world.pose(r.body).position, r.end);
         }
     }
     // Scrolling roads (the Trucks stage's treadmill).

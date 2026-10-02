@@ -260,7 +260,7 @@ pub fn plugin(app: &mut App, root: &std::path::Path) {
         redress: false,
     })
     .insert_resource(CostumeRoot(root.to_path_buf()))
-    .add_systems(Update, (wave_costumes, redress, dress, bind, retint).chain());
+    .add_systems(Update, (wave_costumes, redress, dress, bind, retint, hide_parked_costumes).chain());
 }
 
 /// Lobby costume switch: despawn the pieces that are already on the beasts and clear `applied`
@@ -935,5 +935,29 @@ fn wave_costumes(sim: Option<NonSendMut<Sim>>, mut costumes: ResMut<Costumes>) {
     let Some(mut sim) = sim else { return };
     for (actor, name) in std::mem::take(&mut sim.wave_costumes) {
         costumes.set_preset_for(actor, &name);
+    }
+}
+
+/// Costume pieces of a parked beast (a defeated wave enemy) must not stay behind where it fell.
+fn hide_parked_costumes(
+    sim: Option<NonSend<Sim>>,
+    mut pieces: Query<(&Piece, &mut Visibility), Without<CostumeAttachment>>,
+    mut attached: Query<(&CostumeAttachment, &mut Visibility), Without<Piece>>,
+) {
+    let Some(sim) = sim else { return };
+    let want = |actor: usize| {
+        if sim.parked.get(actor).copied().unwrap_or(false) { Visibility::Hidden } else { Visibility::Inherited }
+    };
+    for (p, mut v) in &mut pieces {
+        let w = want(p.actor);
+        if *v != w {
+            *v = w;
+        }
+    }
+    for (a, mut v) in &mut attached {
+        let w = want(a.actor);
+        if *v != w {
+            *v = w;
+        }
     }
 }
