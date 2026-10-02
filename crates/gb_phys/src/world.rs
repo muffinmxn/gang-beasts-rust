@@ -437,6 +437,31 @@ impl World {
         }
     }
 
+    /// Distance to the first STATIC surface hit by a ray (scene geometry only), or None.
+    pub fn raycast_static(&self, origin: Vec3, dir: Vec3, max: f32) -> Option<f32> {
+        let d = dir.try_normalize()?;
+        unsafe {
+            let filter = PxSceneQueryFilterData {
+                data: PxFilterData_new_1(),
+                flags: PxQueryFlags { mBits: PxQueryFlag::eSTATIC as u16 },
+                structgen_pad0: [0; 2],
+            };
+            let mut hit = PxRaycastHit_new();
+            let ok = PxSceneQueryExt_raycastSingle_mut(
+                self.scene,
+                &px_vec(origin),
+                &px_vec(d),
+                max,
+                PxSceneQueryFlags { mBits: PxHitFlag::ePOSITION as u16 },
+                &mut hit,
+                &filter,
+                null_mut(),
+                null(),
+            );
+            ok.then_some(hit.distance)
+        }
+    }
+
     pub fn new(settings: Settings) -> Result<Self, String> {
         unsafe {
             let sdk = sdk().ok_or("PhysX failed to initialize")?;

@@ -1192,7 +1192,17 @@ fn bot_inputs(sim: &mut Sim) {
         }
         // Do not walk off a ledge: probe the ground a step ahead along the heading is not available without raycasts,
         // so slow down when already lower than the target by a lot (it is below us).
-        let speed = if near { 0.0 } else { 1.0 };
+        let mut speed = if near { 0.0 } else { 1.0 };
+        // Ledge check (stand-in for the real NavMesh): probe the ground 1 m ahead; if it is more than 2.5 m below the
+        // hips (or missing) and the target is not down there, stop at the edge.
+        if speed > 0.0 && dir != Vec3::ZERO {
+            let probe = me + dir * 1.0;
+            let below = sim.world.raycast_static(probe, Vec3::NEG_Y, 6.0);
+            let drop = below.map_or(f32::INFINITY, |d| d);
+            if drop > 2.5 && target.y > me.y - 2.0 {
+                speed = 0.0;
+            }
+        }
         let buttons: [(&'static str, bool); 4] =
             [(act::GRAB_RIGHT, right), (act::GRAB_LEFT, left), (act::JUMP, jump), (act::LIFT, lift)];
         sim.inputs[k].set(&buttons, dir.x * speed, dir.z * speed);
