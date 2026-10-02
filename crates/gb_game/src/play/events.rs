@@ -548,6 +548,8 @@ struct Truck {
 
 #[derive(Default)]
 pub struct StageEvents {
+    in_water: HashSet<usize>,
+    last_splash: f32,
     debug_road_bucket: u64,
     key: (usize, usize, u32),
     ready: bool,
@@ -1002,12 +1004,25 @@ pub fn stage_events(
     // and the trawler stay the hazard): upward acceleration grows with depth, plus water drag.
     if let Some(level) = state.water_level {
         let step_scale = dt / fixed.timestep().as_secs_f32();
+        let mut splash: Option<Vec3> = None;
         for (b, p) in &points {
             let depth = level + wave(p.x, p.z) - p.y;
             if depth > 0.0 && depth < 6.0 {
                 let v = sim.world.linear_velocity(*b);
                 let a = Vec3::Y * (20.0 + 24.0 * depth.min(1.5)) - v * 1.8;
                 sim.world.add_force(*b, a * step_scale, 5);
+                // A body crossing the surface fast makes a splash (once per body until it leaves the water).
+                if depth < 0.6 && v.y < -2.0 && state.in_water.insert(*b) {
+                    splash = Some(*p);
+                }
+            } else if depth <= -0.3 {
+                state.in_water.remove(b);
+            }
+        }
+        if let Some(at) = splash {
+            if now - state.last_splash > 0.3 {
+                state.last_splash = now;
+                sim.sound_queue.push(("GB SFX WATER SPLASHESnew".into(), 0.7, Some(at)));
             }
         }
     }

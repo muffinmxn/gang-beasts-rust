@@ -33,6 +33,7 @@ pub struct SoundState {
     last_voice: HashMap<usize, f32>,
     last_punch: HashMap<usize, f32>,
     alive_prev: Vec<bool>,
+    hands_prev: Vec<[(bool, bool); 2]>,
     message_prev: String,
 }
 
@@ -274,12 +275,49 @@ pub fn round_sounds(sim: &mut Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &Aud
         }
     }
     st.alive_prev = alive;
+    // Swings and grabs: whoosh + effort voice on the rising edge.
+    let hands: Vec<[(bool, bool); 2]> = sim.actors.iter().map(|a| [(a.control.hands[0].punch, a.control.hands[0].joint.is_some()), (a.control.hands[1].punch, a.control.hands[1].joint.is_some())]).collect();
+    if st.hands_prev.len() == hands.len() {
+        for k in 0..hands.len() {
+            if sim.parked.get(k).copied().unwrap_or(false) {
+                continue;
+            }
+            for side in 0..2 {
+                let (punch, grab) = hands[k][side];
+                let (pp, pg) = st.hands_prev[k][side];
+                let at = mirror_position(sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position);
+                let bank = VOICES[(k * 5 + 3) % VOICES.len()];
+                if punch && !pp {
+                    if let Some(clip) = st.pick_family(lib, "GB SFX SWING") {
+                        sfx.play_at(&clip, 0.5, 1.0, at);
+                    }
+                    if st.rand() < 0.3 && now_voice_ok(st, k, sim) {
+                        if let Some(clip) = st.pick_family(lib, &format!("GB VO {bank} DA")) {
+                            sfx.play_at(&clip, 0.45, 1.0, at);
+                        }
+                    }
+                }
+                if grab && !pg && now_voice_ok(st, k, sim) {
+                    if let Some(clip) = st.pick_family(lib, &format!("GB VO {bank} MEH")) {
+                        sfx.play_at(&clip, 0.45, 1.0, at);
+                    }
+                }
+            }
+        }
+    }
+    st.hands_prev = hands;
     let text = sim.round.message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
     if text != st.message_prev {
         if !text.is_empty() {
             let lower = text.to_ascii_lowercase();
             if lower.contains("wins") || lower.contains("defeated") || lower.contains("scores") {
                 sfx.play("GB SFX WIN STAR 1 ALL", 0.7, 1.0);
+                if let Some(k) = alive_first(sim) {
+                    let bank = VOICES[(k * 5 + 3) % VOICES.len()];
+                    if let Some(clip) = st.pick_family(lib, &format!("GB VO {bank} WIN LAUGH")) {
+                        sfx.play(&clip, 0.6, 1.0);
+                    }
+                }
             } else if lower.starts_with("wave") || lower.contains("challenger") || lower.contains("round") {
                 if let Some(clip) = st.pick_family(lib, "GB SFX CountDown a") {
                     sfx.play(&clip, 0.6, 1.0);
@@ -288,4 +326,19 @@ pub fn round_sounds(sim: &mut Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &Aud
         }
         st.message_prev = text;
     }
+}
+
+/// Rate-limits an actor's voice lines to one per 0.8 s of simulated time.
+fn now_voice_ok(st: &mut SoundState, k: usize, sim: &Sim) -> bool {
+    let now = sim.world.steps as f32 * sim.world.settings.fixed_timestep;
+    if now - st.last_voice.get(&k).copied().unwrap_or(-9.0) > 0.8 {
+        st.last_voice.insert(k, now);
+        true
+    } else {
+        false
+    }
+}
+
+fn alive_first(sim: &Sim) -> Option<usize> {
+    (0..sim.actors.len()).find(|&k| crate::round::alive(sim.actors[k].state) && !sim.parked.get(k).copied().unwrap_or(false))
 }
