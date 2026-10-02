@@ -569,7 +569,7 @@ fn setup(
             };
             hint("<  >  COLOUR   Q/E", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.42), 40.0);
             hint("Z X  COSTUME   SHIFT <  >", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.34), 40.0);
-            hint("B  AI PLAYERS", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.26), 40.0);
+            hint("B / SHIFT B  AI PLAYERS", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.26), 40.0);
             hint("SUBMIT", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.40), 40.0);
             hint("BACK", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.46), 40.0);
         }
@@ -1485,7 +1485,8 @@ fn input(
         }
     }
     if menu.current == LOBBY && keys.just_pressed(KeyCode::KeyB) {
-        menu.bots = (menu.bots + 1) % 6;
+        // B adds an AI player (wraps back to 0 after 5); Shift+B removes one.
+        menu.bots = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { (menu.bots + 5) % 6 } else { (menu.bots + 1) % 6 };
         menu.dirty = true;
     }
     let mut costume_delta: isize = 0;
