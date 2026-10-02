@@ -125,6 +125,8 @@ struct Shark {
     arc: Option<Vec3>,
     started: bool,
     start_at: f32,
+    health: f32,
+    max_health: f32,
 }
 
 impl Shark {
@@ -154,7 +156,36 @@ impl Shark {
             arc: None,
             started: false,
             start_at: 0.0,
+            health: 100.0,
+            max_health: 100.0,
         }
+    }
+}
+
+/// Damage of one collision on a breakable stage object (Gondola_Cable / SharkActor `OnCollisionEnter`): the hitter's mass
+/// (0..40) times the impact along the contact normal, /1000, scaled by the hit type of the thing that struck it.
+fn hit_damage(sim: &Sim, c: &gb_phys::Contact, beast_hit: &HashMap<usize, i32>) -> f32 {
+    let other = sim.world.actors[c.other];
+    let Some(ob) = other.body else { return 0.0 };
+    let mass = sim.world.mass(ob).clamp(0.0, 40.0);
+    let n = c.points.first().map_or(Vec3::ZERO, |p| p.normal);
+    let dmg = (mass * n.dot(c.relative_velocity) / 1000.0).abs();
+    let kind = beast_hit.get(&ob).copied().or_else(|| {
+        sim.scenes
+            .iter()
+            .position(|s| s.0 == other.instance)
+            .and_then(|si| sim.stage_interact.get(&(si, other.node)).copied().flatten())
+            .map(|i| i.damage_modifier)
+    });
+    dmg * match kind {
+        Some(0) | None => 0.0,
+        Some(2) => 10.0,
+        Some(3) => 50.0,
+        Some(4) | Some(5) => 150.0,
+        Some(6) => 100.0,
+        Some(7) => 200.0,
+        Some(8) => 1.0e6,
+        _ => 1.0,
     }
 }
 
@@ -191,6 +222,28 @@ fn shark_step(sh: &mut Shark, sim: &mut Sim, level: f32, dt: f32, edt: f32, now:
         sh.state_len = sh.sleep.0 + r[0] * (sh.sleep.1 - sh.sleep.0);
     }
     sh.timer += edt;
+    // CheckDamage / CheckHealth: beasts that hit the shark hurt it; it regains 1 health/s and, at 0, is knocked out
+    // (drops its catch and goes back to sleep for up to `maxUnconsciousTime`).
+    {
+        let beast_hit: HashMap<usize, i32> = sim
+            .actors
+            .iter()
+            .flat_map(|a| Part::ALL.iter().enumerate().map(move |(k, p)| (a.beast.body(*p), a.interact[k])))
+            .collect();
+        let mut dmg = 0.0;
+        for c in &sim.world.contacts {
+            if c.kind == gb_phys::ContactKind::Enter && sh.bodies.iter().any(|(b, _)| sim.world.actors[c.this].body == Some(*b)) {
+                dmg += hit_damage(sim, c, &beast_hit);
+            }
+        }
+        sh.health = (sh.health - dmg + edt).clamp(0.0, sh.max_health);
+        if sh.health <= 0.0 && sh.state != SharkState::Sleeping {
+            sh.held.clear();
+            sh.health = 0.1;
+            let len = 1.0 + r[2] * 0.0;
+            shark_go(sh, SharkState::Sleeping, len);
+        }
+    }
     // Living beasts and their hips.
     let alive: Vec<(usize, Vec3)> = sim
         .actors
@@ -768,28 +821,7 @@ pub fn stage_events(
                 continue;
             }
             let Some(cab) = state.cables.iter().position(|k| sim.world.actors[c.this].body == Some(k.body)) else { continue };
-            let other = sim.world.actors[c.other];
-            let Some(ob) = other.body else { continue };
-            let mass = sim.world.mass(ob).clamp(0.0, 40.0);
-            let n = c.points.first().map_or(Vec3::ZERO, |p| p.normal);
-            let mut dmg = (mass * n.dot(c.relative_velocity) / 1000.0).abs();
-            let kind = beast_hit.get(&ob).copied().or_else(|| {
-                sim.scenes
-                    .iter()
-                    .position(|s| s.0 == other.instance)
-                    .and_then(|si| sim.stage_interact.get(&(si, other.node)).copied().flatten())
-                    .map(|i| i.damage_modifier)
-            });
-            dmg *= match kind {
-                Some(0) | None => 0.0,
-                Some(2) => 10.0,
-                Some(3) => 50.0,
-                Some(4) | Some(5) => 150.0,
-                Some(6) => 100.0,
-                Some(7) => 200.0,
-                Some(8) => 1.0e6,
-                _ => 1.0,
-            };
+            let dmg = hit_damage(&sim, c, &beast_hit);
             hits.push((cab, dmg));
         }
         for (cab, dmg) in hits {
@@ -1581,6 +1613,8 @@ fn init(
                 arc: None,
                 started: false,
                 start_at: f("startDelay", 60.0) * (0.9 + 0.2 * r),
+                health: f("health", 100.0),
+                max_health: f("maxHealth", 100.0),
             });
         }
         if !state.sharks.is_empty() {
