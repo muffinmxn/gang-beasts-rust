@@ -1394,6 +1394,14 @@ fn bot_inputs(sim: &mut Sim) {
                     let aim = attack.map_or(ball, |goal| ball - (goal - ball).normalize_or_zero() * 0.8);
                     // Get behind the ball first, then drive through it toward the goal they attack.
                     let drive = attack.map_or(ball, |goal| ball + (goal - ball).normalize_or_zero() * 3.0);
+                    // Keep the approach point on the pitch (the walls are ~5 m either side of the goal line).
+                    let aim = match (sim.goals.first(), sim.goals.get(1)) {
+                        (Some(g0), Some(g1)) => {
+                            let (lo_x, hi_x) = (g0.1.x.min(g1.1.x) + 0.6, g0.1.x.max(g1.1.x) - 0.6);
+                            Vec3::new(aim.x.clamp(lo_x, hi_x), aim.y, aim.z.clamp(g0.1.z - 4.3, g0.1.z + 4.3))
+                        }
+                        _ => aim,
+                    };
                     let target = if (aim - me).length() < 1.1 { drive } else { aim };
                     best = Some(((target - me).length().max(REACH + 0.1), target));
                 }

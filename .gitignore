@@ -10,6 +10,7 @@
 !/.cargo/
 !/.github/
 !/crates/
+!/docs/
 !/tools/
 /tools/*
 !/tools/extract/

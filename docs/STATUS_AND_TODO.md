@@ -1,0 +1,115 @@
+# Status and TODO (for contributors / forks)
+
+This file is the living to-do list. **Update it in the same commit as the work** (move items between sections, add
+newly found bugs). The repo contains no game content: never commit extracted assets, decompiled game code or
+screenshots of the game. See `README.md` for setup.
+
+Legend: `[x]` done, `[~]` partial / approximate, `[ ]` not started.
+
+## How the project is organised
+
+| Path | What |
+|---|---|
+| `crates/gb_phys` | PhysX 4.1 binding and Unity-scene physics import (rigidbodies, colliders, joints, contacts). No Bevy. |
+| `crates/gb_logic` | Beast / actor gameplay logic ported from the game (movement, grabbing, punching, damage). No Bevy. |
+| `crates/gb_game` | The Bevy 0.16 app: rendering, menus, costumes, rounds, modes, stage events, water, audio. |
+| `crates/gb_game/src/play/events.rs` | All per-stage scripted events (trains, trucks, sharks, cranes, elevators, cables, ...). |
+| `tools/extract` | Python exporters that read **your own** copy of the game into `assets/export/` (git-ignored). |
+| `tools/harness` | Screenshot / comparison helpers. |
+
+Useful workflow: the maintainers keep a private, uncommitted Il2CppDumper dump and Ghidra decompiles of single classes
+(game code is never committed). If you do the same for your own copy, port the logic from the field list and decompile,
+then verify with an offscreen render (`GB_WINDOW_OFFSCREEN=1 GB_SCREENSHOT=out.png GB_SCREENSHOT_AFTER=600 target/debug/gb_game.exe <stage>`).
+
+## Game modes (`crates/gb_game/src/round.rs`, `play.rs`)
+
+- [x] Melee, Gang (teams), local AI players (`--bots N`, lobby `B` / `Shift+B`).
+- [x] Waves: the game's 4-wave data, Big and Tiny beasts (own prefabs and AIProfiles), enemies spawn in the room behind the
+  stage door and walk out, humans are pushed out of that room, results then back to the menu, best run remembered.
+  - [~] Waves 3-4 use Tiny/Big enemies that the retail `WavesData` does not have (added for variety).
+  - [ ] Only Rooftop / Subway / Grind / Incinerator are offered; Chute and Aquarium are test-only stages.
+- [~] Soccer (Alley): ball, goals, score HUD, kick-off reset. Bots dribble toward the goal but rarely score
+  (see "Bots"). Costumed beasts do not show their team colour.
+- [~] Rumble (Ring): timed entrants walk into the ring. The Rumble-only object set (railings, entrance triggers,
+  `GamemodeEnabled`) is not applied: those nodes have no exported meshes.
+- [ ] King of the Hill, Capture the Flag, Big Fight (enum values exist in the game; not in the menu).
+- [ ] Online / networking (everything is local).
+
+## Bots (`play.rs` `bot_inputs`)
+
+- [x] `ControlHandeler_Computer` timings, per-type `AIProfile` (Normal / Big / Tiny), ledge check, stuck -> jump.
+- [ ] Real NavMesh-style routing (they walk in straight lines; Waves enemies have a special door waypoint).
+- [ ] Soccer: bots wedge the ball into walls. Needs proper pathing around the ball.
+
+## Stage events (`play/events.rs`)
+
+Done: subway trains, truck roads and wander, Ferris wheel, doors/shutters (`OnTriggerStayApplyForce`), falling props
+(`PoolSpawner`), fans, elevators (incl. failure), cranes, buoyancy (rides the sea waves), sharks (state machine,
+breach, carry, damage), trawler capsize, train landslide and scrolling track, gondola cables (damage and snap).
+
+- [ ] Train stage: curved track sections and `NodeFollower` (the cars should steer along `TrackNode` chains; the track
+  is straight and the train bodies are held in place).
+- [ ] Birds on Rooftop / Crane (`BirdActor`, `BirdFSM`, `CritterEscalationManager`): the bird nodes are inactive in the
+  scene, have no exported meshes and need runtime body creation.
+- [ ] Per-mode object activation (`GamemodeEnabled`) beyond what is special-cased.
+- [ ] Towers `SlowDestroyTowersStairwell`, billboard/girders joint-break tuning, `TrucksMoveRoadVertex` wobble.
+- [~] Sharks: jaw animation not ported. Elevators / sharks / cranes are tuned by eye.
+
+## Graphics
+
+- [x] Lightmaps (RGBM), vinyl lightmaps, URP-style post, per-stage fog, sky domes, Gerstner sea (`water.rs`).
+- [~] Per-stage colour grades for Ring, Incinerator and Subway are hand-tuned stand-ins (`main.rs`, env knobs
+  `GB_RING_*`, `GB_INC_*`, `GB_SUBWAY_EV`), not matched against real captures.
+- [ ] Water: depth fade, shoreline foam, refraction. Sea LOD tile seams show as thin dark lines at the horizon.
+- [ ] Shadowmask / directional lightmaps / light-probe parity, SSAO and shadow softness parity.
+- [ ] Particles, glass and fog cards; Incinerator fire is an emissive stand-in.
+- [ ] Soccer / Alley: black patches at the screen edges (missing background geometry).
+
+## Characters and costumes
+
+- [x] Costume presets, per-player colour, unseen-mesh removal, tint model, per-player costumes carried into the match.
+- [ ] Costume physics (dangling parts), costume editor beyond colour, animation clips / emotes.
+- [ ] Swim, dive, backflip, double jump, headbutt, elbow (beasts in water are floated by a simple hack).
+
+## UI / HUD / meta
+
+- [x] Lobby (mode/stage/wins/AI/colour, remembered between runs), loading screen, round banner and coinboard.
+- [ ] In-match HUD parity: name bars, timers, key prompts (needs real captures to match).
+- [ ] Settings screens are wired for graphics only; controls rebinding is not.
+- [ ] Save / progression / unlockables.
+
+## Audio (`crates/gb_game/src/audio.rs`)
+
+See the "Audio" section in `README.md` for extraction. Status of each part is tracked here:
+
+- [~] Extraction of every `AudioClip` to WAV (`tools/extract/audio.py`).
+- [~] Impact / punch / footstep / voice one-shots from physics contacts, UI sounds, music and ambience.
+- [ ] Positional mixing, mixer groups and exact volumes from the game's AudioMixer assets.
+- [ ] Per-surface footsteps, water loops, train / crane / elevator loops, shark and bird calls.
+
+## Physics (`crates/gb_phys`)
+
+- [x] Scene settings, collision matrix, joints (Unity basis fix), CCD modes, kinematic movers, joint release.
+- [ ] Unity's 0.04 s maximum timestep clamp is not applied (it would slow debug builds down).
+- [ ] A few stage meshes produce "invalid PxGeometry" warnings (Containers).
+
+## Known bugs
+
+- Subway is still darker than the retail game after the +1 EV stand-in.
+- Alley black screen-edge patches; Alley exports with missing meshes (the menu-content bundle is required).
+- Bots in Soccer rarely score; the ball is reset after being wedged for 8 s.
+- Debug builds are slow on integrated GPUs; use `cargo run --release` for play.
+
+## Debug knobs (environment variables)
+
+`GB_EVENT_TIME_SCALE` (speed up stage events), `GB_DRIFT_REPORT` / `GB_DRIFT_FILTER`, `GB_PROP_DEBUG`,
+`GB_WAVES_FIRST=N`, `GB_WAVES_KILL`, `GB_WAVES_LOSE`, `GB_WAVES_TYPE=1|2`, `GB_WAVE_TRACE`, `GB_WAVE_TEST_ENTER`,
+`GB_SOCCER_TEST`, `GB_SOCCER_TRACE`, `GB_RELOAD_TEST=<step>`, `GB_ROAD_DEBUG`, `GB_NO_WATER_WAVES`,
+`GB_WAVE_HEIGHT` / `GB_WAVE_BUMP` / `GB_WAVE_FOAM` / `GB_WAVE_TIME`, `GB_NO_RETURN_TO_MENU` (tests). F2 opens the
+in-game knob panel.
+
+## Contributing checklist
+
+1. `cargo build -j 4` with **zero warnings**, `cargo test` green.
+2. Verify the change in the real build (offscreen render or play it).
+3. Update this file, commit, push. Small commits, one topic each.
