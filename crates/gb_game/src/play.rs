@@ -1059,6 +1059,13 @@ fn waves(sim: &mut Sim) {
     }
     let dt = sim.world.settings.fixed_timestep;
     sim.wave_clock += dt;
+    // Debug: GB_WAVES_LOSE=1 knocks out the humans 6 s in (exercises the loss -> menu path).
+    if std::env::var_os("GB_WAVES_LOSE").is_some() && sim.wave_clock > 6.0 && sim.wave_clock < 6.0 + dt * 1.5 {
+        for k in 0..humans {
+            let Sim { actors, world, .. } = &mut *sim;
+            actors[k].kill(world);
+        }
+    }
     // Debug: GB_WAVES_KILL=1 knocks out each wave 4 s after it spawns (exercises the full wave sequence).
     if std::env::var_os("GB_WAVES_KILL").is_some() && sim.wave_clock > 4.0 && sim.wave_clock < 4.0 + dt * 1.5 {
         for k in humans..sim.actors.len() {
