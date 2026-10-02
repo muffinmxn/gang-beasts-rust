@@ -566,6 +566,7 @@ pub fn stage_events(
     mut materials: ResMut<Assets<StandardMaterial>>,
     vinyl_query: Query<(&MeshMaterial3d<crate::vinyl::VinylMaterial>, &bevy::gltf::GltfMaterialName)>,
     mut vinyl: ResMut<Assets<crate::vinyl::VinylMaterial>>,
+    sea: Option<Res<crate::water::SeaWaves>>,
 ) {
     if sim.lobby {
         return;
@@ -897,12 +898,15 @@ pub fn stage_events(
             }
         }
     }
+    // Wave height at a world xz (the sea shader's Gerstner sum), 0 on stages without waves.
+    let wave_t = time.elapsed_secs_wrapped();
+    let wave = |x: f32, z: f32| sea.as_ref().map_or(0.0, |s| s.height(x, z, wave_t));
     // Beasts in water float at the surface (Actor swim state is not ported; this keeps heads above water so sharks
     // and the trawler stay the hazard): upward acceleration grows with depth, plus water drag.
     if let Some(level) = state.water_level {
         let step_scale = dt / fixed.timestep().as_secs_f32();
         for (b, p) in &points {
-            let depth = level - p.y;
+            let depth = level + wave(p.x, p.z) - p.y;
             if depth > 0.0 && depth < 6.0 {
                 let v = sim.world.linear_velocity(*b);
                 let a = Vec3::Y * (20.0 + 24.0 * depth.min(1.5)) - v * 1.8;
@@ -918,7 +922,9 @@ pub fn stage_events(
             // distance under its authored height (pivot vs collider bounds are not the same point), so buoys,
             // ice and the Trawler hull sat too low. Use the same stiffness as a spring about the authored rest
             // height: a = g + k * (rest - y) - c * vy, which holds the saved pose and still bobs when pushed.
-            let pose_y = sim.world.pose(f.body).position.y;
+            let pose_pos = sim.world.pose(f.body).position;
+            let pose_y = pose_pos.y;
+            let rest_y = f.rest_y + wave(pose_pos.x, pose_pos.z);
             // Buoyancy only acts in the water: bodies that carry SimpleBuoyancy but ride above it (the Ferris
             // wheel's burger cars, crane containers) must hang freely.
             if pose_y > level + 1.5 && f.rest_y > level + 1.5 {
@@ -930,8 +936,8 @@ pub fn stage_events(
             let k = f.force * 2.0 / f.falloff.max(0.1) * 4.0;
             let g = 20.0;
             let _ = level;
-            f.bias = (f.bias + k * (f.rest_y - pose_y) * dt * 1.5).clamp(-40.0, 120.0);
-            let a = (g + f.bias + k * (f.rest_y - pose_y) - 2.0 * k.sqrt() * 0.6 * vy).clamp(0.0, 250.0);
+            f.bias = (f.bias + k * (rest_y - pose_y) * dt * 1.5).clamp(-40.0, 120.0);
+            let a = (g + f.bias + k * (rest_y - pose_y) - 2.0 * k.sqrt() * 0.6 * vy).clamp(0.0, 250.0);
             sim.world.add_force(f.body, Vec3::Y * a * step_scale, 5);
         }
     }

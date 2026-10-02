@@ -23,3 +23,5 @@ for %%S in (menu rooftop aquarium incinerator alley billboard blimp buoy chute c
   %PY% %X%\export.py graphics stages-%%S_scenes %%S-graphics
 )
 echo Done. Build and run:  cargo run -p gb_game -- menu
+
+python toolsxtract\water_params.py

@@ -14,6 +14,7 @@ mod round;
 mod scene;
 mod sky;
 mod vinyl;
+mod water;
 
 use bevy::gltf::GltfExtras;
 use bevy::image::ImageLoaderSettings;
@@ -406,6 +407,7 @@ fn run() -> Result<(), String> {
     if let Some(sim) = sim {
         app.insert_non_send_resource(sim).add_plugins(play::plugin);
         costume::plugin(&mut app, &root);
+        water::plugin(&mut app, &root);
     }
     if menu_mode {
         app.insert_resource(menu::MenuRoot(root.clone()))
