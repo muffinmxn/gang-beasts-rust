@@ -16,6 +16,7 @@ set X=tools\extract
 %PY% %X%\export_prompt_sprites.py
 %PY% %X%\export_costume_items.py
 %PY% %X%\export_costumes.py
+%PY% %X%\export.py costume-prefab core-globalassets "Mode/Football/Football.prefab" football
 for %%S in (menu rooftop aquarium incinerator alley billboard blimp buoy chute containers crane elevators girders gondola grind lighthouse ring subway towers train trawler trucks vents wheel) do (
   echo == %%S
   %PY% %X%\export.py scene stages-%%S_scenes %%S
