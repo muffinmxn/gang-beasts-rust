@@ -207,6 +207,7 @@ fn setup(
         .unwrap_or_default();
     // Stages this lobby can launch: an export is launchable when `<name>.glb`, `<name>.json`
     // and `<name>-graphics.json` all exist (the same set the CLI accepts).
+    let prefs = load_prefs();
     let stages: Vec<String> = {
         let mut found: Vec<String> = std::fs::read_dir(&root.0)
             .map(|entries| {
@@ -784,13 +785,28 @@ fn setup(
         screens,
         current: start,
         selected,
-        wins: 3,
-        stage_index: stages.iter().position(|s| s == "rooftop").unwrap_or(0),
-        mode: crate::round::Mode::from_id(&std::env::var("GB_MODE").unwrap_or_default()),
-        bots: std::env::var("GB_BOTS").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+        wins: prefs["wins"].as_u64().map_or(3, |w| (w as u32).clamp(1, 10)),
+        stage_index: prefs["stage"]
+            .as_str()
+            .and_then(|name| stages.iter().position(|s| s == name))
+            .or_else(|| stages.iter().position(|s| s == "rooftop"))
+            .unwrap_or(0),
+        mode: match std::env::var("GB_MODE") {
+            Ok(id) => crate::round::Mode::from_id(&id),
+            Err(_) => crate::round::Mode::from_id(prefs["mode"].as_str().unwrap_or("")),
+        },
+        bots: std::env::var("GB_BOTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| prefs["bots"].as_u64().map_or(0, |b| (b as usize).min(5))),
         stages,
         palette,
-        player_color: env_index("GB_COLOUR", 0).min(palette_len.saturating_sub(1)),
+        player_color: if std::env::var_os("GB_COLOUR").is_some() {
+            env_index("GB_COLOUR", 0)
+        } else {
+            prefs["colour"].as_u64().unwrap_or(0) as usize
+        }
+        .min(palette_len.saturating_sub(1)),
         item_keys,
         root: root.0.clone(),
         dirty: true,
@@ -1668,6 +1684,7 @@ fn input(
                         "--assets".into(),
                         menu.root.to_string_lossy().into_owned(),
                     ];
+                    save_prefs(&menu);
                     menu.launch = Some(1.6);
                     menu.go(SPLASH);
                 }
@@ -1958,4 +1975,36 @@ fn stage_allowed(mode: crate::round::Mode, stage: &str) -> bool {
         Mode::Rumble => stage == "ring",
         _ => stage != "alley" && stage != "ring" || stage == "ring",
     }
+}
+
+/// Lobby choices (mode, stage, wins, AI count, colour) are remembered between launches in
+/// `%APPDATA%/gb-rust/lobby.json` (or `$HOME/.gb-rust/lobby.json`).
+fn prefs_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("APPDATA")
+        .map(std::path::PathBuf::from)
+        .map(|p| p.join("gb-rust"))
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".gb-rust")))?;
+    Some(base.join("lobby.json"))
+}
+
+fn load_prefs() -> serde_json::Value {
+    prefs_path()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn save_prefs(menu: &Menu) {
+    let Some(path) = prefs_path() else { return };
+    let value = serde_json::json!({
+        "mode": menu.mode.id(),
+        "stage": menu.stages.get(menu.stage_index),
+        "wins": menu.wins,
+        "bots": menu.bots,
+        "colour": menu.player_color,
+    });
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap_or_default());
 }
