@@ -108,6 +108,16 @@ impl Costumes {
         self.actor_choices.get(&actor).map(String::as_str).or(self.chosen_name())
     }
 
+    /// The preset an actor is actually wearing (applied), else the chosen one: what the match launch must
+    /// carry over so the lobby look is the match look even if the player never pressed Z/X.
+    pub fn worn_for(&self, actor: usize) -> Option<String> {
+        self.applied
+            .get(&actor)
+            .and_then(|&i| self.presets.get(i))
+            .map(|p| p.name.clone())
+            .or_else(|| self.chosen_for(actor).map(str::to_string))
+    }
+
     /// Name of the currently chosen preset, for the lobby label.
     pub fn chosen_name(&self) -> Option<&str> {
         self.choice.as_deref()
@@ -297,6 +307,15 @@ fn redress(
 fn preset_for(costumes: &Costumes, k: usize) -> Option<usize> {
     if costumes.presets.is_empty() {
         return None;
+    }
+    // `--costumes a|b|c` from the lobby: each local player's worn preset ("none" = no outfit).
+    if let Some(name) = std::env::var("GB_COSTUMES").ok().and_then(|v| v.split('|').nth(k).map(str::to_string)) {
+        if name == "none" {
+            return None;
+        }
+        if let Some(i) = costumes.presets.iter().position(|p| p.name.eq_ignore_ascii_case(&name)) {
+            return Some(i);
+        }
     }
     if let Some(name) = costumes.actor_choices.get(&k) {
         if let Some(i) = costumes.presets.iter().position(|p| p.name.eq_ignore_ascii_case(name)) {

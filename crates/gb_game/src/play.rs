@@ -96,6 +96,8 @@ pub struct Sim {
     rumble_spawns: Vec<Transform>,
     /// Costumes requested for wave beasts: (actor, preset name), consumed by `costume::wave_costumes`.
     pub wave_costumes: Vec<(usize, String)>,
+    /// Stage reloads so far (stage events re-initialise on change).
+    pub reloads: u32,
     bots: HashMap<usize, Bot>,
     /// Lobby: backed out; bodies out of the simulation and hidden until the slot is reused.
     pub parked: Vec<bool>,
@@ -259,6 +261,10 @@ impl Sim {
     }
 
     pub fn player_color(&self, k: usize) -> Color {
+        if self.round.mode == crate::round::Mode::Waves && k < self.round.players {
+            // Waves: every local player is red (palette 0).
+            return self.player_colors[0];
+        }
         // Gang mode: a gang shares its colour (the gang's first fighter).
         let k = self.round.mode.team_of(k);
         self.player_colors[(self.player_color_start + k) % self.player_colors.len().max(1)]
@@ -273,6 +279,7 @@ impl Sim {
     /// GameManagerNew reloads the level between rounds: put every stage body back where it
     /// started, restore shattered glass, clear shards and respawn every beast.
     fn reload_stage(&mut self) {
+        self.reloads += 1;
         for &(b, pose) in &self.round.stage_poses {
             self.world.restore_body(b);
             self.world.teleport(b, pose);
@@ -448,6 +455,7 @@ pub fn build(
         wave_clock: 0.0,
         rumble_spawns: vec![],
         wave_costumes: vec![],
+        reloads: 0,
         bots: HashMap::new(),
         parked: vec![],
         cam_forward: Vec3::Z,
@@ -621,6 +629,37 @@ pub fn build(
         } else {
             println!("soccer: this stage has no FootballGoals (play it on Alley)");
         }
+    }
+    // Trucks: beasts start on the truck decks (TruckBase bodies), spread over the trucks.
+    let inst = sim.scenes[0].0;
+    let mut decks: Vec<(f32, Vec3)> = vec![];
+    for (i, n) in sim.scenes[0].1.nodes.iter().enumerate() {
+        if !n.components.iter().any(|c| c.script.as_deref() == Some("TruckBase")) {
+            continue;
+        }
+        let Some(&body) = sim.world.instances[inst].bodies.get(&i) else { continue };
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for (k, c) in sim.world.colliders.iter().enumerate() {
+            if c.body == Some(body) && !c.trigger {
+                let (centre, ext) = sim.world.collider_bounds(k);
+                lo = lo.min(centre - ext);
+                hi = hi.max(centre + ext);
+            }
+        }
+        if lo.x <= hi.x {
+            decks.push((hi.y, (lo + hi) * 0.5));
+        }
+    }
+    if !decks.is_empty() {
+        let slots = [(0.0, 0.0), (0.7, 0.0), (-0.7, 0.0), (0.0, 0.8), (0.0, -0.8), (0.7, 0.8), (-0.7, 0.8), (-0.7, -0.8)];
+        let mut points = vec![];
+        for (dx, dz) in slots {
+            for (top, centre) in &decks {
+                points.push(Transform::from_translation(mirror_position(Vec3::new(centre.x + dx, top + 0.6, centre.z + dz))));
+            }
+        }
+        println!("trucks: {} deck spawn(s) on {} truck(s), first {:?}", points.len(), decks.len(), decks.first());
+        sim.spawn_points = points;
     }
     Ok(sim)
 }
@@ -961,6 +1000,57 @@ fn rumble(sim: &mut Sim) {
 const WAVES: [&[(&str, u8)]; 4] = [&[("Firefighter_01", 0)], &[("Riot", 0), ("Riot", 1)], &[("", 0), ("", 0), ("", 0)], &[("", 0), ("", 0), ("", 0), ("", 0)]];
 const WAVE_FALLBACK_COSTUMES: [&str; 6] = ["OfficeShort", "OfficeLong_2", "BusinessSuit", "TIE", "Riot", "Firefighter_01"];
 
+/// Enemy entrances: every stage node under a "Waves" spawn group (`GBGangSpawnPoint` under `Spawns/WavesSpawnPoint`,
+/// `Spawners/Waves/*`), expanded by the point's `_options` offsets (a queue of slots behind the door).
+fn wave_entrances(sim: &Sim) -> Vec<Transform> {
+    let src = &sim.scenes[0].1;
+    let poses = src.world_poses(Pose::IDENTITY);
+    let mut out = vec![];
+    for (i, n) in src.nodes.iter().enumerate() {
+        if !n.path.to_ascii_lowercase().contains("wave") {
+            continue;
+        }
+        let Some(c) = n.components.iter().find(|c| matches!(c.script.as_deref(), Some("GBGangSpawnPoint") | Some("GBSpawnPoint"))) else {
+            continue;
+        };
+        let base = poses[i];
+        let mut slots = vec![Vec3::ZERO];
+        if let Some(opts) = c.data["_options"].as_array() {
+            slots = opts
+                .iter()
+                .map(|o| {
+                    let f = |k: &str| o["offset"][k].as_f64().unwrap_or(0.0) as f32;
+                    Vec3::new(f("x"), f("y"), f("z"))
+                })
+                .collect();
+            if slots.is_empty() {
+                slots.push(Vec3::ZERO);
+            }
+        }
+        // The spawn room sits behind a (static) door: stand the queue just outside the doorway instead, so the
+        // enemies walk out of the door rather than being stuck inside the wall.
+        let door = src
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.path.ends_with("Door (Solid)") || d.path.ends_with("/Door"))
+            .map(|(j, _)| poses[j].position)
+            .filter(|p| (*p - base.position).length() < 6.0)
+            .min_by(|a, b| (*a - base.position).length().total_cmp(&(*b - base.position).length()));
+        for off in slots {
+            let at = if let Some(door) = door {
+                let dir = Vec3::new(door.x - base.position.x, 0.0, door.z - base.position.z).normalize_or_zero();
+                let side = Vec3::new(-dir.z, 0.0, dir.x);
+                Vec3::new(door.x, base.position.y, door.z) + dir * (1.2 - off.z) + side * off.x
+            } else {
+                base.position + base.rotation * off
+            };
+            out.push(Transform::from_translation(mirror_position(at)));
+        }
+    }
+    out
+}
+
 fn waves(sim: &mut Sim) {
     let humans = sim.round.players.min(sim.actors.len());
     if humans == 0 || sim.spawn_points.is_empty() || sim.round.game_over {
@@ -1009,7 +1099,12 @@ fn waves(sim: &mut Sim) {
             // Debug: GB_WAVES_TYPE=1|2 forces every enemy to Big / Tiny.
             let forced = std::env::var("GB_WAVES_TYPE").ok().and_then(|v| v.parse::<u8>().ok());
             let kind = &forced.unwrap_or(*kind);
-            let at = sim.spawn_points[(sim.next_spawn + i) % sim.spawn_points.len()];
+            let entrances = wave_entrances(sim);
+            let at = if entrances.is_empty() {
+                sim.spawn_points[(sim.next_spawn + i) % sim.spawn_points.len()]
+            } else {
+                entrances[i % entrances.len()]
+            };
             // Reuse a parked AI slot of the same beast type, otherwise spawn a new one.
             let free = (humans..sim.actors.len()).find(|&j| {
                 sim.parked[j] && sim.actor_variant[j] == *kind && !sim.wave_costumes.iter().any(|(a, _)| *a == j)
@@ -1028,6 +1123,7 @@ fn waves(sim: &mut Sim) {
                 }
             };
             wave_used.push(k);
+            info!("wave enemy {k} (type {kind}) at {:?}", at.translation);
             let name = if costume.is_empty() {
                 WAVE_FALLBACK_COSTUMES[(sim.next_spawn + i) % WAVE_FALLBACK_COSTUMES.len()]
             } else {
@@ -1217,7 +1313,8 @@ fn bot_inputs(sim: &mut Sim) {
             1 => (2.0, 1.0, 0.5, 10.0, 0.2),
             _ => (1.5, 0.2, 1.0, 1.0, 0.4),
         };
-        sim.actors[k].punch_modifier = force;
+        // The authored 10x launches the Big beast's targets off the map in this port; temper the boost.
+        sim.actors[k].punch_modifier = if force > 1.0 { 1.0 + (force - 1.0) * 0.12 } else { force };
         let delay = delay_override.unwrap_or(pdelay);
         let (WINDUP, PUNCH, RESET) = (windup * delay, 0.1 * delay, 0.2 * delay);
         let _ = reach;
@@ -1809,7 +1906,7 @@ fn apply_player_colors(
         // Each local player continues from the chosen swatch (the source hands successive players
         // the next unlocked colour); using the same index for everyone made every beast the same
         // colour.
-        let chosen = base + player;
+        let chosen = if sim.round.mode == crate::round::Mode::Waves && player < sim.round.players { 0 } else { base + player };
         if applied.get(&scene) == Some(&chosen) {
             continue;
         }

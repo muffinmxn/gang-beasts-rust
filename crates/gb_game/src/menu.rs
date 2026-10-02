@@ -1393,11 +1393,25 @@ fn input(
             let (u, d) = screen.nav.get(&sel).copied().unwrap_or((None, None));
             let idx = screen.items.iter().position(|&x| x == sel).unwrap_or(0);
             let n = screen.items.len().max(1);
-            menu.selected = Some(if up {
+            let mut next = if up {
                 u.unwrap_or(screen.items[(idx + n - 1) % n])
             } else {
                 d.unwrap_or(screen.items[(idx + 1) % n])
-            });
+            };
+            // Waves has no Wins row: step over it.
+            if menu.current == LOBBY
+                && menu.mode == crate::round::Mode::Waves
+                && menu.item_keys.get(&next).map(String::as_str) == Some("MENU_WINS")
+            {
+                let (u2, d2) = screen.nav.get(&next).copied().unwrap_or((None, None));
+                let at = screen.items.iter().position(|&x| x == next).unwrap_or(0);
+                next = if up {
+                    u2.unwrap_or(screen.items[(at + n - 1) % n])
+                } else {
+                    d2.unwrap_or(screen.items[(at + 1) % n])
+                };
+            }
+            menu.selected = Some(next);
         }
     }
     let key = menu
@@ -1468,19 +1482,30 @@ fn input(
         let all = crate::round::Mode::ALL;
         let at = all.iter().position(|m| *m == menu.mode).unwrap_or(0);
         menu.mode = all[if lobby_right { (at + 1) % all.len() } else { (at + all.len() - 1) % all.len() }];
+        if !stage_allowed(menu.mode, menu.stages.get(menu.stage_index).map_or("", String::as_str)) {
+            let mode = menu.mode;
+            if let Some(i) = menu.stages.iter().position(|s| stage_allowed(mode, s)) {
+                menu.stage_index = i;
+            }
+        }
         menu.dirty = true;
     }
     if menu.current == LOBBY && (lobby_left || lobby_right) && key == "MENU_STAGE" {
         // The stage row cycles the exported stages (the launch used to hardcode "rooftop").
         if !menu.stages.is_empty() {
             let n = menu.stages.len();
-            menu.stage_index = if lobby_right {
-                (menu.stage_index + 1) % n
-            } else if menu.stage_index == 0 {
-                n - 1
-            } else {
-                menu.stage_index - 1
-            };
+            for _ in 0..n {
+                menu.stage_index = if lobby_right {
+                    (menu.stage_index + 1) % n
+                } else if menu.stage_index == 0 {
+                    n - 1
+                } else {
+                    menu.stage_index - 1
+                };
+                if stage_allowed(menu.mode, &menu.stages[menu.stage_index]) {
+                    break;
+                }
+            }
             menu.dirty = true;
         }
     }
@@ -1628,6 +1653,16 @@ fn input(
                             })
                             .unwrap_or("none")
                             .to_string(),
+                        "--costumes".into(),
+                        (0..players as usize)
+                            .map(|k| {
+                                costumes
+                                    .as_ref()
+                                    .and_then(|c| c.worn_for(k))
+                                    .unwrap_or_else(|| "none".to_string())
+                            })
+                            .collect::<Vec<_>>()
+                            .join("|"),
                         "--assets".into(),
                         menu.root.to_string_lossy().into_owned(),
                     ];
@@ -1902,10 +1937,23 @@ fn layout(
         // Lobby: the match-option rows only appear once the host is ready, but plain labels
         // (item: None — e.g. the COLOUR / SUBMIT / BACK prompts from the reference) must show
         // as soon as a beast is in the lobby.
-        *vis = if menu.current == LOBBY && !menu.lobby_options && t.item.is_some() {
+        let hide_wins = menu.current == LOBBY && menu.mode == crate::round::Mode::Waves && row == Some("MENU_WINS");
+        *vis = if hide_wins || (menu.current == LOBBY && !menu.lobby_options && t.item.is_some()) {
             Visibility::Hidden
         } else {
             Visibility::Visible
         };
+    }
+}
+
+/// Stages a mode can be played on. Waves needs the stage's wave entrance / `GamemodeEnabled` Waves objects
+/// (rooftop, subway, grind, incinerator, chute, aquarium); Soccer is Alley's; Rumble is the Ring's.
+fn stage_allowed(mode: crate::round::Mode, stage: &str) -> bool {
+    use crate::round::Mode;
+    match mode {
+        Mode::Waves => ["rooftop", "subway", "grind", "incinerator", "chute", "aquarium"].contains(&stage),
+        Mode::Soccer => stage == "alley",
+        Mode::Rumble => stage == "ring",
+        _ => stage != "alley" && stage != "ring" || stage == "ring",
     }
 }

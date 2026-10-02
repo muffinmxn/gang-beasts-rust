@@ -98,6 +98,10 @@ fn run() -> Result<(), String> {
                 let id = args.next().ok_or("--mode requires a mode id")?;
                 std::env::set_var("GB_MODE", id);
             }
+            "--costumes" => {
+                let list = args.next().ok_or("--costumes requires a|b|c")?;
+                std::env::set_var("GB_COSTUMES", list);
+            }
             "--costume" => {
                 // The lobby passes its chosen preset through; costume::preset_for reads GB_COSTUME.
                 let name = args.next().ok_or("--costume requires a preset name")?;

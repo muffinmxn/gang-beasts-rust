@@ -230,7 +230,7 @@ struct Truck {
 
 #[derive(Default)]
 pub struct StageEvents {
-    key: (usize, usize),
+    key: (usize, usize, u32),
     ready: bool,
     trains: Vec<Train>,
     spawners: Vec<Spawner>,
@@ -314,7 +314,7 @@ pub fn stage_events(
         return;
     }
     let Some((_, stage, _)) = sim.scenes.first() else { return };
-    let key = (stage.nodes.len(), sim.world.instances.len());
+    let key = (stage.nodes.len(), sim.world.instances.len(), sim.reloads);
     if state.key != key {
         *state = StageEvents { key, rng: 0x9E3779B9 ^ key.0 as u32, ..Default::default() };
     }
@@ -1501,8 +1501,9 @@ fn init(
                 state.roads.push(Road {
                     body,
                     pose,
-                    start: mirror_position(pa.position),
-                    end: mirror_position(pb.position),
+                    // The treadmill scrolls the opposite way to the authored start->end.
+                    start: mirror_position(pb.position),
+                    end: mirror_position(pa.position),
                     speed: d["speed"].as_f64().unwrap_or(0.0) as f32,
                 });
             }
