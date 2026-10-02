@@ -1438,6 +1438,7 @@ fn fly_camera(
 fn auto_screenshot(
     mut commands: Commands,
     mut settled: Local<Option<u32>>,
+    mut waited: Local<u32>,
     assets: Res<AssetServer>,
     roots: Query<(&SceneRoot, Option<&SceneInstance>)>,
     meshes: Query<(), With<Mesh3d>>,
@@ -1455,8 +1456,10 @@ fn auto_screenshot(
                 return;
             }
         }
+        *waited += 1;
+        // Small stages (Alley exports 15 meshes) never reach the 100-mesh heuristic: after ~10 s accept any count.
         if !roots.is_empty()
-            && meshes.iter().count() >= 100
+            && (meshes.iter().count() >= 100 || *waited > 600)
             && roots.iter().all(|(root, instance)| {
                 assets.is_loaded_with_dependencies(&root.0)
                     && instance.is_some_and(|id| spawner.instance_is_ready(**id))
