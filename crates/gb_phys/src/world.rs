@@ -1535,6 +1535,30 @@ impl World {
     }
 
     /// Object.Destroy(joint)
+    /// Release every joint attached to `body` (a snapped elevator cable, a cut rope). Returns how many.
+    pub fn release_joints_of(&mut self, body: usize) -> usize {
+        let mut released = 0;
+        let mut k = 0;
+        while k < self.all_joints.len() {
+            let (a, b) = self.joint_links.get(k).copied().unwrap_or((None, None));
+            if a == Some(body) || b == Some(body) {
+                let j = self.all_joints.remove(k);
+                self.joint_links.remove(k);
+                self.invulnerable_joints.retain(|(x, _, _)| *x != j);
+                for slot in self.runtime_joints.iter_mut() {
+                    if *slot == Some(j) {
+                        *slot = None;
+                    }
+                }
+                unsafe { PxJoint_release_mut(j as *mut PxJoint) };
+                released += 1;
+            } else {
+                k += 1;
+            }
+        }
+        released
+    }
+
     pub fn remove_joint(&mut self, handle: usize) {
         if let Some(Some(j)) = self.runtime_joints.get(handle).copied() {
             self.all_joints.retain(|x| *x != j);

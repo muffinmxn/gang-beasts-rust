@@ -231,6 +231,8 @@ pub struct StageEvents {
     props: Vec<PropSpawner>,
     track: Option<Track>,
     lifts: Vec<Lift>,
+    /// `Elevators_Logic` malfunction: (time it happens, which car).
+    lift_failure: Option<(f32, usize)>,
     fans: Vec<Fan>,
     /// (material name prefix, colour) chosen by ContainerTinter, applied by `apply_container_tints`.
     pub container_tints: Vec<(String, Color)>,
@@ -486,6 +488,19 @@ pub fn stage_events(
                     }
                 }
             }
+        }
+    }
+    // Elevator malfunction: one car's cable snaps; it becomes a free body and drops down the shaft.
+    if let Some((at, car)) = state.lift_failure {
+        if now >= at && car < state.lifts.len() {
+            let body = state.lifts[car].body;
+            sim.world.set_kinematic(body, false);
+            sim.world.set_use_gravity(body, true);
+            let n = sim.world.release_joints_of(body);
+            info!("elevator car released {n} joint(s)");
+            state.lifts.remove(car);
+            state.lift_failure = None;
+            info!("elevator {car} malfunction: cable snapped");
         }
     }
     // Elevator cars.
@@ -1149,6 +1164,14 @@ fn init(
         }
     }
     if !state.lifts.is_empty() {
+        if let Some(d) = nodes.iter().find_map(|n| script_of(n, "Elevators_Logic")) {
+            let lo = d["minMalfunctionTime"].as_f64().unwrap_or(120.0) as f32;
+            let hi = d["maxMalfunctionTime"].as_f64().unwrap_or(240.0) as f32;
+            let at = lo + state.rand01() * (hi - lo);
+            let car = (state.rand01() * state.lifts.len() as f32) as usize % state.lifts.len();
+            state.lift_failure = Some((at, car));
+            info!("stage events: elevator {car} fails at {at:.0}s");
+        }
         info!("stage events: {} elevator car(s)", state.lifts.len());
     }
     // Train stage: straight track pieces scroll; the train itself is held at the origin.
