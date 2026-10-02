@@ -71,7 +71,7 @@ Useful options: `--assets <dir>` (default `assets\export`), `--players N`, `--wi
 `--costume <preset name>`. Soccer is played on `alley`, Rumble on `ring`.
 Many `GB_*` environment variables tune rendering and gameplay; press **F2** in game for the live knob panel.
 
-Lobby controls: `Q`/`E` (or ←/→) change colour, `Z`/`X` (or Shift + ←/→) change costume, `B` add AI players. Gameplay controls are
+Lobby controls: `Q`/`E` (or ←/→) change colour, `Z`/`X` (or Shift + ←/→) change costume, `B` add an AI player (up to 5) and `Shift+B` remove one. The Mode row picks Melee, Gang, Waves, Soccer or Rumble and the Stage row only lists maps that mode can be played on. Your choices (mode, stage, wins, AI count, colour) and your best Waves run are remembered in `%APPDATA%\gb-rust\lobby.json`. Gameplay controls are
 listed by the in-game pause/controls screen.
 
 ## Layout
