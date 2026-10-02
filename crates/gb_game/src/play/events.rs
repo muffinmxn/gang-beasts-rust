@@ -202,6 +202,8 @@ struct Floater {
     falloff: f32,
     /// Authored (rest) height: the scene is saved with every floating body already at its waterline.
     rest_y: f32,
+    /// Integral term: carries jointed fragments / riders so the body settles exactly at `rest_y`.
+    bias: f32,
 }
 
 /// `Road` (0x7487E0): a kinematic road tile that MoveTowards(end) at `speed` and wraps to `start`.
@@ -669,10 +671,23 @@ pub fn stage_events(
             }
         }
     }
+    // Beasts in water float at the surface (Actor swim state is not ported; this keeps heads above water so sharks
+    // and the trawler stay the hazard): upward acceleration grows with depth, plus water drag.
+    if let Some(level) = state.water_level {
+        let step_scale = dt / fixed.timestep().as_secs_f32();
+        for (b, p) in &points {
+            let depth = level - p.y;
+            if depth > 0.0 && depth < 6.0 {
+                let v = sim.world.linear_velocity(*b);
+                let a = Vec3::Y * (20.0 + 24.0 * depth.min(1.5)) - v * 1.8;
+                sim.world.add_force(*b, a * step_scale, 5);
+            }
+        }
+    }
     // Floating bodies (buoys, ice, crane containers).
     if let Some(level) = state.water_level {
         let step_scale = dt / fixed.timestep().as_secs_f32();
-        for f in &state.floaters {
+        for f in &mut state.floaters {
             // The source law (acceleration = force*2*depth/falloff below the surface) settles each body some
             // distance under its authored height (pivot vs collider bounds are not the same point), so buoys,
             // ice and the Trawler hull sat too low. Use the same stiffness as a spring about the authored rest
@@ -684,10 +699,13 @@ pub fn stage_events(
                 continue;
             }
             let vy = sim.world.linear_velocity(f.body).y;
-            let k = f.force * 2.0 / f.falloff.max(0.1);
+            // x4: the source applies its force over every buoyancy collider of the body; one point under-supports
+            // a floe with beasts on it (ice was pushed under the surface).
+            let k = f.force * 2.0 / f.falloff.max(0.1) * 4.0;
             let g = 20.0;
             let _ = level;
-            let a = (g + k * (f.rest_y - pose_y) - 2.0 * k.sqrt() * 0.6 * vy).clamp(0.0, 80.0);
+            f.bias = (f.bias + k * (f.rest_y - pose_y) * dt * 1.5).clamp(-40.0, 120.0);
+            let a = (g + f.bias + k * (f.rest_y - pose_y) - 2.0 * k.sqrt() * 0.6 * vy).clamp(0.0, 250.0);
             sim.world.add_force(f.body, Vec3::Y * a * step_scale, 5);
         }
     }
@@ -1465,7 +1483,9 @@ fn init(
                         body,
                         force: d["force"].as_f64().unwrap_or(1.0) as f32,
                         falloff: d["forceFalloff"].as_f64().unwrap_or(0.5) as f32,
-                        rest_y: sim.world.pose(body).position.y,
+                        // Authored height from the scene (physics has already sagged a few frames by now).
+                        rest_y: poses[i].position.y,
+                        bias: 0.0,
                     });
                 }
             }
@@ -1561,6 +1581,9 @@ pub fn drift_report(sim: NonSend<Sim>, mut done: Local<bool>) {
         moved.push(((actual - expected).length() + angle * 0.01, *node, expected, actual));
     }
     moved.sort_by(|a, b| b.0.total_cmp(&a.0));
+    if let Ok(filter) = std::env::var("GB_DRIFT_FILTER") {
+        moved.retain(|(_, n, _, _)| src.nodes[*n].path.contains(filter.as_str()));
+    }
     info!("drift report: {} bodies, top movers:", moved.len());
     for (d, node, e, a) in moved.iter().take(10) {
         info!("  node {node} {} moved score {d:.3}  expected {e:?} actual {a:?}", src.nodes[*node].path.rsplit('/').next().unwrap_or(""));
