@@ -234,7 +234,28 @@ pub fn contact_sounds(sim: &Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &Audio
 }
 
 /// KO sounds when a beast goes down, and the round banner stingers. Call every physics step.
-pub fn round_sounds(sim: &Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &AudioLib) {
+pub fn round_sounds(sim: &mut Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &AudioLib) {
+    // Sounds requested by game logic (cable snaps, shark bites, splashes).
+    for (family, volume, pos) in std::mem::take(&mut sim.sound_queue) {
+        if !sfx.enabled {
+            continue;
+        }
+        let clip = if lib.files.contains_key(&family) { Some(family) } else { st.pick_family(lib, &family) };
+        if let Some(clip) = clip {
+            match pos {
+                Some(p) => sfx.play_at(&clip, volume, 1.0, mirror_position(p)),
+                None => sfx.play(&clip, volume, 1.0),
+            }
+        }
+    }
+    // Glass panes that just broke.
+    let broken = sim.fractures.glass.iter().filter(|g| g.broken).count();
+    if broken > sim.glass_broken_prev {
+        if let Some(clip) = st.pick_family(lib, "GB GLASS BREAK SFX") {
+            sfx.play(&clip, 0.9, 1.0);
+        }
+    }
+    sim.glass_broken_prev = broken;
     if !sfx.enabled || sim.lobby {
         return;
     }

@@ -101,6 +101,9 @@ pub struct Sim {
     pub reloads: u32,
     /// Stage export name (audio data lookup).
     pub stage_name: String,
+    /// Sounds requested by game logic: (clip family, volume, physics-space position). Drained by `sounds::round_sounds`.
+    pub sound_queue: Vec<(String, f32, Option<Vec3>)>,
+    glass_broken_prev: usize,
     /// Soccer: seconds the ball has been (nearly) still.
     ball_idle: f32,
     ball_anchor: Vec3,
@@ -459,6 +462,8 @@ pub fn build(
         wave_costumes: vec![],
         reloads: 0,
         stage_name: stage.to_string(),
+        sound_queue: Vec::new(),
+        glass_broken_prev: 0,
         ball_idle: 0.0,
         ball_anchor: Vec3::ZERO,
         wave_door_cache: None,

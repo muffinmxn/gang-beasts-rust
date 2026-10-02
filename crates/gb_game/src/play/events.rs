@@ -338,6 +338,8 @@ fn shark_step(sh: &mut Shark, sim: &mut Sim, level: f32, dt: f32, edt: f32, now:
                     let t_apex = vy / G;
                     let h = Vec3::new(p.x - sh.pos.x, 0.0, p.z - sh.pos.z) / t_apex;
                     sh.arc = Some(Vec3::new(h.x, vy, h.z));
+                    sim.sound_queue.push(("GB SFX WATER SPLASHESnew".into(), 0.9, Some(sh.pos)));
+                    sim.sound_queue.push(("GB SFX SHARK JAW OPEN".into(), 0.8, Some(sh.pos)));
                 }
                 if sh.timer >= sh.state_len {
                     shark_go(sh, SharkState::Retreating, 0.0);
@@ -381,7 +383,8 @@ fn shark_step(sh: &mut Shark, sim: &mut Sim, level: f32, dt: f32, edt: f32, now:
 }
 
 /// `FixedJoint biteJoint` stand-in: the beast's body parts are carried at the mouth.
-fn grab(sh: &mut Shark, sim: &Sim, actor: usize) {
+fn grab(sh: &mut Shark, sim: &mut Sim, actor: usize) {
+    sim.sound_queue.push(("GB SFX SHARK JAW CLOSE".into(), 1.0, Some(sh.pos + sh.dir * sh.mouth)));
     let hips = sim.world.pose(sim.actors[actor].beast.body(Part::Hips)).position;
     sh.held = Part::ALL
         .iter()
@@ -803,6 +806,8 @@ pub fn stage_events(
             sim.world.set_use_gravity(body, true);
             let n = sim.world.release_joints_of(body);
             info!("elevator car released {n} joint(s)");
+            let snap_at = sim.world.pose(body).position;
+            sim.sound_queue.push(("GB SFX METAL CABLE SNAP".into(), 1.0, Some(snap_at)));
             state.lifts.remove(car);
             state.lift_failure = None;
             info!("elevator {car} malfunction: cable snapped");
@@ -833,6 +838,8 @@ pub fn stage_events(
             if k.health <= 0.0 {
                 let n = sim.world.release_joints_of(k.body);
                 info!("gondola cable snapped ({n} joints released)");
+                let at = sim.world.pose(k.body).position;
+                sim.sound_queue.push(("GB SFX METAL CABLE SNAP".into(), 1.0, Some(at)));
             }
         }
     }
