@@ -98,6 +98,9 @@ pub struct Sim {
     pub wave_costumes: Vec<(usize, String)>,
     /// Stage reloads so far (stage events re-initialise on change).
     pub reloads: u32,
+    /// Soccer: seconds the ball has been (nearly) still.
+    ball_idle: f32,
+    ball_anchor: Vec3,
     /// Cached Waves entrance door (computed on first use).
     wave_door_cache: Option<Option<(Vec3, Vec3)>>,
     bots: HashMap<usize, Bot>,
@@ -452,6 +455,8 @@ pub fn build(
         rumble_spawns: vec![],
         wave_costumes: vec![],
         reloads: 0,
+        ball_idle: 0.0,
+        ball_anchor: Vec3::ZERO,
         wave_door_cache: None,
         bots: HashMap::new(),
         parked: vec![],
@@ -647,7 +652,7 @@ pub fn build(
                             let scene = sim.scenes.len() - 1;
                             sim.pending_props.push((scene, "football.glb".into()));
                             sim.ball = Some((scene, bodies, pose));
-                            println!("soccer: ball at {mid:?}, {} goals", sim.goals.len());
+                            println!("soccer: ball at {mid:?}, goals {:?}", sim.goals.iter().map(|g| (g.0, g.1, g.3)).collect::<Vec<_>>());
                         }
                         Err(e) => println!("soccer ball: {e}"),
                     }
@@ -1235,6 +1240,9 @@ fn soccer(sim: &mut Sim) {
         }
     }
     let p = sim.world.pose(body).position;
+    if std::env::var_os("GB_SOCCER_TRACE").is_some() && sim.world.steps % 150 == 0 {
+        info!("soccer ball at step {}: {:?}", sim.world.steps, p);
+    }
     let mut scored: Option<usize> = None;
     for (team, c, r, h) in &sim.goals {
         let local = r.inverse() * (p - *c);
@@ -1242,8 +1250,19 @@ fn soccer(sim: &mut Sim) {
             scored = Some(1 - (*team).min(1));
         }
     }
-    // Ball lost off the pitch: back to kick-off.
-    let lost = p.y < kickoff.position.y - 30.0;
+    // Ball lost off the pitch, or wedged in a corner for 8 s: back to kick-off.
+    // "Wedged" = it has not left a 1.5 m circle for 8 s (pushed into a corner against the wall).
+    if (p - sim.ball_anchor).length() > 1.5 {
+        sim.ball_anchor = p;
+        sim.ball_idle = 0.0;
+    } else {
+        sim.ball_idle += sim.world.settings.fixed_timestep;
+    }
+    let wedged = sim.ball_idle > 8.0;
+    if wedged {
+        sim.ball_idle = 0.0;
+    }
+    let lost = p.y < kickoff.position.y - 30.0 || wedged;
     if let Some(team) = scored {
         sim.soccer_score[team] += 1;
         let name = if team == 0 { "Red" } else { "Blue" };
@@ -1373,7 +1392,10 @@ fn bot_inputs(sim: &mut Sim) {
                     let ball = sim.world.pose(b).position;
                     let attack = sim.goals.iter().find(|g| g.0 != mode.team_of(k)).map(|g| g.1);
                     let aim = attack.map_or(ball, |goal| ball - (goal - ball).normalize_or_zero() * 0.8);
-                    best = Some(((aim - me).length().max(REACH + 0.1), aim));
+                    // Get behind the ball first, then drive through it toward the goal they attack.
+                    let drive = attack.map_or(ball, |goal| ball + (goal - ball).normalize_or_zero() * 3.0);
+                    let target = if (aim - me).length() < 1.1 { drive } else { aim };
+                    best = Some(((target - me).length().max(REACH + 0.1), target));
                 }
             }
         }
