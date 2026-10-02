@@ -67,10 +67,11 @@ target\debug\gb_game.exe subway --players 2 --wins 3 --mode gang
 ```
 
 Useful options: `--assets <dir>` (default `assets\export`), `--players N`, `--wins N`,
-`--mode melee|gang`, `--spawn N`, `--player-color N`, `--costume <preset name>`.
+`--mode melee|gang|waves|football|rumble`, `--bots N` (local AI opponents), `--spawn N`, `--player-color N`,
+`--costume <preset name>`. Soccer is played on `alley`, Rumble on `ring`.
 Many `GB_*` environment variables tune rendering and gameplay; press **F2** in game for the live knob panel.
 
-Lobby controls: `Q`/`E` (or ←/→) change colour, `Z`/`X` (or Shift + ←/→) change costume. Gameplay controls are
+Lobby controls: `Q`/`E` (or ←/→) change colour, `Z`/`X` (or Shift + ←/→) change costume, `B` add AI players. Gameplay controls are
 listed by the in-game pause/controls screen.
 
 ## Layout
@@ -85,9 +86,10 @@ tools/harness    optional screenshot / comparison helpers
 
 ## Status
 
-Playable: rooftop and many other stages, melee and gang modes, costumes, lobby, trains on the subway,
-scrolling truck roads, the Ferris wheel. Work in progress: per-stage graphics parity (fog, lightmaps, water),
-more stage scripts (sharks, cranes, elevators…), Soccer / Waves modes, audio, networking.
+Playable: 23 stages, modes Melee, Gang, Waves (the game's 4-wave data), Soccer (Alley) and Rumble (Ring), local AI
+opponents, costumes, lobby, and many stage events (subway trains, truck roads, Ferris wheel, falling props, doors, fans,
+elevator failure, trawler capsize, sharks, train landslide). Work in progress: per-stage graphics parity, animation
+clips, swimming, audio, networking.
 
 ## Contributing
 
