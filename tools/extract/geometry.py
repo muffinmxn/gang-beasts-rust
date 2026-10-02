@@ -100,6 +100,11 @@ def geometry(handler, submeshes=None, to_local=None, bind_count=0):
             # Unity omits the redundant weight channel on rigid, single-bone skins.
             attrs["JOINTS_0"] = [[0, 0, 0, 0] for _ in used]
             attrs["WEIGHTS_0"] = [[1.0, 0.0, 0.0, 0.0] for _ in used]
+        elif indices and not weights:
+            # Indices without a weight channel (Billboard bendable beams): every vertex is fully bound to its
+            # first bone index.
+            attrs["JOINTS_0"] = [[int(indices[i][0]), 0, 0, 0] for i in used]
+            attrs["WEIGHTS_0"] = [[1.0, 0.0, 0.0, 0.0] for _ in used]
         else:
             raise ValueError("skinned mesh has bind poses but no usable bone weights")
     # Mirroring X reverses winding; unbatching a reflected transform reverses it again.
