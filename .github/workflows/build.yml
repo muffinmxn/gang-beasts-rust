@@ -1,0 +1,11 @@
+name: build
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Tests need assets extracted from a licensed copy of the game, so CI only checks that everything compiles.
+      - run: cargo build --workspace --all-targets
