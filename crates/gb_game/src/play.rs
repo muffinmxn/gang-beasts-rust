@@ -88,6 +88,8 @@ pub struct Sim {
     pub lobby_ready: Vec<bool>,
     /// Waves mode clock (seconds since the last wave was cleared / started).
     wave_clock: f32,
+    /// Costumes requested for wave beasts: (actor, preset name), consumed by `costume::wave_costumes`.
+    pub wave_costumes: Vec<(usize, String)>,
     bots: HashMap<usize, Bot>,
     /// Lobby: backed out; bodies out of the simulation and hidden until the slot is reused.
     pub parked: Vec<bool>,
@@ -403,6 +405,7 @@ pub fn build(
         device_actor: HashMap::new(),
         lobby_ready: vec![],
         wave_clock: 0.0,
+        wave_costumes: vec![],
         bots: HashMap::new(),
         parked: vec![],
         cam_forward: Vec3::Z,
@@ -868,31 +871,66 @@ fn auto_raw(sim: &Sim) -> Option<Raw> {
 /// Keyboard + mouse: WASD/arrows, Space jump, Ctrl duck/headbutt, F kick, Shift lift, LMB/RMB arms.
 /// `GameMode_Waves` (simplified): every wave spawns `2 + wave` AI beasts at the stage spawn points; the next wave starts
 /// 5 s after the last AI falls. AI chase the nearest living player and punch when close.
+/// The game's `WavesData` "Default" asset (core-globalassets): four waves of 1, 2, 3 and 4 beasts; wave 1 is a fire
+/// fighter, wave 2 riot police, the rest wear the fallback costumes. Surviving every wave wins the match.
+const WAVES: [&[&str]; 4] = [&["Firefighter_01"], &["Riot", "Riot"], &["", "", ""], &["", "", "", ""]];
+const WAVE_FALLBACK_COSTUMES: [&str; 6] = ["OfficeShort", "OfficeLong_2", "BusinessSuit", "TIE", "Riot", "Firefighter_01"];
+
 fn waves(sim: &mut Sim) {
     let humans = sim.round.players.min(sim.actors.len());
-    if humans == 0 || sim.spawn_points.is_empty() {
+    if humans == 0 || sim.spawn_points.is_empty() || sim.round.game_over {
         return;
     }
     let dt = sim.world.settings.fixed_timestep;
     sim.wave_clock += dt;
+    // Debug: GB_WAVES_KILL=1 knocks out each wave 4 s after it spawns (exercises the full wave sequence).
+    if std::env::var_os("GB_WAVES_KILL").is_some() && sim.wave_clock > 4.0 && sim.wave_clock < 4.0 + dt * 1.5 {
+        for k in humans..sim.actors.len() {
+            if !sim.parked[k] {
+                let Sim { actors, world, .. } = &mut *sim;
+                actors[k].kill(world);
+            }
+        }
+    }
     let alive_ai: Vec<usize> = (humans..sim.actors.len())
         .filter(|&k| crate::round::alive(sim.actors[k].state) && !sim.parked[k])
         .collect();
     if alive_ai.is_empty() && sim.wave_clock > 5.0 {
+        // Park the previous wave's beasts.
+        for k in humans..sim.actors.len() {
+            if !sim.parked[k] {
+                sim.park_beast(k);
+            }
+        }
+        let done = sim.round.wave as usize;
+        if done >= WAVES.len() {
+            sim.round.game_over = true;
+            sim.round.message = Some(crate::round::Message { text: "All Waves Defeated!".into(), color: Color::WHITE, age: 0.0 });
+            info!("waves: all {} waves defeated", WAVES.len());
+            return;
+        }
+        let wave = WAVES[done];
         sim.round.wave += 1;
         sim.wave_clock = 0.0;
-        let count = (2 + sim.round.wave as usize).min(8);
-        for i in 0..count {
+        sim.round.message = Some(crate::round::Message { text: format!("Wave {}", sim.round.wave), color: Color::WHITE, age: 0.0 });
+        for (i, costume) in wave.iter().enumerate() {
             let at = sim.spawn_points[(sim.next_spawn + i) % sim.spawn_points.len()];
             let k = humans + i;
             if k < sim.actors.len() {
                 sim.unpark_beast(k, at);
             } else if let Err(e) = sim.spawn_beast(at) {
                 error!("wave spawn failed: {e}");
+                continue;
             }
+            let name = if costume.is_empty() {
+                WAVE_FALLBACK_COSTUMES[(sim.next_spawn + i) % WAVE_FALLBACK_COSTUMES.len()]
+            } else {
+                costume
+            };
+            sim.wave_costumes.push((k, name.to_string()));
         }
-        sim.next_spawn += count;
-        info!("wave {} ({} AI)", sim.round.wave, count);
+        sim.next_spawn += wave.len();
+        info!("wave {} ({} AI)", sim.round.wave, wave.len());
     }
 }
 

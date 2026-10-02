@@ -95,6 +95,14 @@ impl Costumes {
         true
     }
 
+    /// Dress an actor in a named preset (Waves enemies).
+    pub fn set_preset_for(&mut self, actor: usize, name: &str) {
+        if self.presets.iter().any(|p| p.name.eq_ignore_ascii_case(name)) {
+            self.actor_choices.insert(actor, name.to_string());
+            self.redress = true;
+        }
+    }
+
     /// Preset name chosen for an actor (what the match launch passes through).
     pub fn chosen_for(&self, actor: usize) -> Option<&str> {
         self.actor_choices.get(&actor).map(String::as_str).or(self.chosen_name())
@@ -242,7 +250,7 @@ pub fn plugin(app: &mut App, root: &std::path::Path) {
         redress: false,
     })
     .insert_resource(CostumeRoot(root.to_path_buf()))
-    .add_systems(Update, (redress, dress, bind, retint).chain());
+    .add_systems(Update, (wave_costumes, redress, dress, bind, retint).chain());
 }
 
 /// Lobby costume switch: despawn the pieces that are already on the beasts and clear `applied`
@@ -901,4 +909,12 @@ fn retint(
 fn costume_tint() -> [f32; 3] {
     // Through the knob store so the in-game panel (F2) can change it live.
     crate::devgui::knob_rgb("GB_COSTUME_TINT", [1.0, 1.0, 1.0])
+}
+
+/// Waves: apply the costumes the wave director asked for.
+fn wave_costumes(sim: Option<NonSendMut<Sim>>, mut costumes: ResMut<Costumes>) {
+    let Some(mut sim) = sim else { return };
+    for (actor, name) in std::mem::take(&mut sim.wave_costumes) {
+        costumes.set_preset_for(actor, &name);
+    }
 }
