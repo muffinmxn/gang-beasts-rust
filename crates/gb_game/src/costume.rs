@@ -496,7 +496,7 @@ fn bind(
                                 .find(|(_, entity)| *entity == beast_bone)
                                 .map(|(node, _)| *node)
                             {
-                                let bind = bind_world(sim.beast_sidecar(), bone_node);
+                                let bind = bind_world(sim.beast_sidecar_of(piece.actor), bone_node);
                                 let local = bind.inverse() * kid_world.affine();
                                 let (scale, rotation, translation) =
                                     local.to_scale_rotation_translation();
@@ -681,7 +681,7 @@ fn bind(
                         .map(|(node, entity)| (*entity, *node))
                         .collect();
                     for (node, entity) in &beast_nodes {
-                        let path = &sim.beast_sidecar().nodes[*node].path;
+                        let path = &sim.beast_sidecar_of(piece.actor).nodes[*node].path;
                         if !path.ends_with("_skinnedMesh") {
                             continue;
                         }
@@ -699,7 +699,7 @@ fn bind(
                                 target,
                                 &volumes,
                                 &cloth_points,
-                                sim.beast_sidecar(),
+                                sim.beast_sidecar_of(piece.actor),
                                 &entity_node,
                                 &mut skins,
                                 &mut mask_assets.meshes,

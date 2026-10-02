@@ -18,6 +18,11 @@ mod events;
 pub struct Sim {
     pub world: World,
     beast_src: Sidecar,
+    /// `actor_humanoidMediumEctomorph (Big)` / `(Tiny)` sidecars (variant 1 = Big, 2 = Tiny; 0 = normal).
+    beast_variants: HashMap<u8, Sidecar>,
+    /// Variant of each actor's beast and the glb its render scene uses.
+    pub actor_variant: Vec<u8>,
+    scene_glb: HashMap<usize, &'static str>,
     /// Kill Volume trigger boxes (Unity space): pose, half extents.
     kill_boxes: Vec<(Iso, Vec3)>,
     /// Breakable glass (Fracture) and its shards.
@@ -216,6 +221,13 @@ struct Hud;
 
 impl Sim {
     pub fn spawn_beast(&mut self, spawn: Transform) -> Result<usize, String> {
+        self.spawn_beast_variant(spawn, 0)
+    }
+
+    /// Spawn a beast of the given prefab variant (0 normal, 1 Big, 2 Tiny).
+    pub fn spawn_beast_variant(&mut self, spawn: Transform, variant: u8) -> Result<usize, String> {
+        let src = self.beast_variants.get(&variant).unwrap_or(&self.beast_src).clone();
+        let variant = if self.beast_variants.contains_key(&variant) { variant } else { 0 };
         let origin = Pose {
             position: mirror_position(spawn.translation),
             rotation: mirror_rotation(spawn.rotation),
@@ -224,15 +236,17 @@ impl Sim {
         let n = self.actors.len();
         let instance = self
             .world
-            .spawn(&format!("beast{n}"), &self.beast_src, origin)?;
-        let beast = Beast::new(&self.world, instance, &self.beast_src)?;
+            .spawn(&format!("beast{n}"), &src, origin)?;
+        let beast = Beast::new(&self.world, instance, &src)?;
         beast.setup_rigidbodies(&mut self.world);
         self.actors
             .push(Actor::new(beast, &self.world, 0x5eed + n as u32 * 7919));
         self.inputs.push(InputState::default());
         self.scenes
-            .push((instance, self.beast_src.clone(), spawn.compute_matrix()));
+            .push((instance, src, spawn.compute_matrix()));
         self.actor_scene.push(self.scenes.len() - 1);
+        self.actor_variant.push(variant);
+        self.scene_glb.insert(self.scenes.len() - 1, match variant { 1 => "beast_big.glb", 2 => "beast_tiny.glb", _ => "beast.glb" });
         self.actor_spawn.push(origin);
         self.lobby_ready.push(false);
         self.parked.push(false);
@@ -285,6 +299,14 @@ impl Sim {
     /// The beast sidecar (for `RemoveUnseenMesh`: rest-pose bone positions).
     pub fn beast_sidecar(&self) -> &Sidecar {
         &self.beast_src
+    }
+
+    /// Sidecar of the prefab variant actor `k` uses (Big / Tiny bind poses differ from the normal beast).
+    pub fn beast_sidecar_of(&self, actor: usize) -> &Sidecar {
+        self.actor_variant
+            .get(actor)
+            .and_then(|v| self.beast_variants.get(v))
+            .unwrap_or(&self.beast_src)
     }
 
     fn actor_bodies(&self, actor: usize) -> Vec<usize> {
@@ -360,6 +382,24 @@ pub fn build(
     let mut sim = Sim {
         world,
         beast_src,
+        beast_variants: {
+            let mut m = HashMap::new();
+            for (v, name) in [(1u8, "beast_big"), (2u8, "beast_tiny")] {
+                if let Ok(mut src) = Sidecar::load(root, name) {
+                    for n in &mut src.nodes {
+                        for c in &mut n.components {
+                            if c.kind == "ConfigurableJoint" {
+                                c.data["m_ProjectionMode"] = 1.into();
+                            }
+                        }
+                    }
+                    m.insert(v, src);
+                }
+            }
+            m
+        },
+        actor_variant: vec![],
+        scene_glb: HashMap::new(),
         actors: vec![],
         inputs: vec![],
         actor_scene: vec![],
@@ -917,7 +957,8 @@ fn rumble(sim: &mut Sim) {
 
 /// The game's `WavesData` "Default" asset (core-globalassets): four waves of 1, 2, 3 and 4 beasts; wave 1 is a fire
 /// fighter, wave 2 riot police, the rest wear the fallback costumes. Surviving every wave wins the match.
-const WAVES: [&[&str]; 4] = [&["Firefighter_01"], &["Riot", "Riot"], &["", "", ""], &["", "", "", ""]];
+/// (costume, beast type): type 0 normal, 1 Big (`beastTypePref[1]`), 2 Tiny. Wave 2 is a normal and a Big riot cop.
+const WAVES: [&[(&str, u8)]; 4] = [&[("Firefighter_01", 0)], &[("Riot", 0), ("Riot", 1)], &[("", 0), ("", 0), ("", 0)], &[("", 0), ("", 0), ("", 0), ("", 0)]];
 const WAVE_FALLBACK_COSTUMES: [&str; 6] = ["OfficeShort", "OfficeLong_2", "BusinessSuit", "TIE", "Riot", "Firefighter_01"];
 
 fn waves(sim: &mut Sim) {
@@ -946,6 +987,12 @@ fn waves(sim: &mut Sim) {
                 sim.park_beast(k);
             }
         }
+        // Debug: GB_WAVES_FIRST=N starts at wave N (1-based).
+        if sim.round.wave == 0 {
+            if let Some(n) = std::env::var("GB_WAVES_FIRST").ok().and_then(|v| v.parse::<u32>().ok()) {
+                sim.round.wave = n.saturating_sub(1);
+            }
+        }
         let done = sim.round.wave as usize;
         if done >= WAVES.len() {
             sim.round.game_over = true;
@@ -954,18 +1001,30 @@ fn waves(sim: &mut Sim) {
             return;
         }
         let wave = WAVES[done];
+        let mut wave_used: Vec<usize> = Vec::new();
         sim.round.wave += 1;
         sim.wave_clock = 0.0;
         sim.round.message = Some(crate::round::Message { text: format!("Wave {}", sim.round.wave), color: Color::WHITE, age: 0.0 });
-        for (i, costume) in wave.iter().enumerate() {
+        for (i, (costume, kind)) in wave.iter().enumerate() {
             let at = sim.spawn_points[(sim.next_spawn + i) % sim.spawn_points.len()];
-            let k = humans + i;
-            if k < sim.actors.len() {
-                sim.unpark_beast(k, at);
-            } else if let Err(e) = sim.spawn_beast(at) {
-                error!("wave spawn failed: {e}");
-                continue;
-            }
+            // Reuse a parked AI slot of the same beast type, otherwise spawn a new one.
+            let free = (humans..sim.actors.len()).find(|&j| {
+                sim.parked[j] && sim.actor_variant[j] == *kind && !sim.wave_costumes.iter().any(|(a, _)| *a == j)
+                    && !wave_used.contains(&j)
+            });
+            let k = if let Some(j) = free {
+                sim.unpark_beast(j, at);
+                j
+            } else {
+                match sim.spawn_beast_variant(at, *kind) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        error!("wave spawn failed: {e}");
+                        continue;
+                    }
+                }
+            };
+            wave_used.push(k);
             let name = if costume.is_empty() {
                 WAVE_FALLBACK_COSTUMES[(sim.next_spawn + i) % WAVE_FALLBACK_COSTUMES.len()]
             } else {
@@ -1105,8 +1164,7 @@ pub struct Bot {
 fn bot_inputs(sim: &mut Sim) {
     // `AIProfile` "NormalAI" (core-globalassets): _punchDelayModifier 1.5 scales the Computer controller's
     // windup/punch/reset (0.2/0.1/0.2 s). `GB_AI_PUNCH_DELAY` overrides (TinyAI 0.75, BigAI 2.0).
-    let delay = std::env::var("GB_AI_PUNCH_DELAY").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.5);
-    let (WINDUP, PUNCH, RESET) = (0.2 * delay, 0.1 * delay, 0.2 * delay);
+    let delay_override = std::env::var("GB_AI_PUNCH_DELAY").ok().and_then(|v| v.parse::<f32>().ok());
     const REACH: f32 = 1.4;
     let humans = sim.round.players.min(sim.actors.len());
     let dt = sim.world.settings.fixed_timestep;
@@ -1149,6 +1207,9 @@ fn bot_inputs(sim: &mut Sim) {
                 }
             }
         }
+        // AIProfile per beast type: NormalAI punch delay 1.5, TinyAI 0.75, BigAI 2.0.
+        let delay = delay_override.unwrap_or(match sim.actor_variant.get(k).copied().unwrap_or(0) { 2 => 0.75, 1 => 2.0, _ => 1.5 });
+        let (WINDUP, PUNCH, RESET) = (0.2 * delay, 0.1 * delay, 0.2 * delay);
         let bot = sim.bots.entry(k).or_default();
         let Some((dist, target)) = best else {
             sim.inputs[k].set(&[], 0.0, 0.0);
@@ -1537,10 +1598,12 @@ fn spawn_roots(mut sim: NonSendMut<Sim>, mut commands: Commands, assets: Res<Ass
             PhysicsScene(scene),
         ));
     }
-    for scene in sim.pending_roots.drain(..) {
+    let pending: Vec<usize> = sim.pending_roots.drain(..).collect();
+    for scene in pending {
+        let file = sim.scene_glb.get(&scene).copied().unwrap_or("beast.glb");
         // The physics places every beast node itself, relative to an identity root.
         commands.spawn((
-            SceneRoot(assets.load(GltfAssetLabel::Scene(0).from_asset("beast.glb"))),
+            SceneRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
             Transform::IDENTITY,
             PhysicsScene(scene),
         ));
