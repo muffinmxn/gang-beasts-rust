@@ -1006,6 +1006,9 @@ fn waves(sim: &mut Sim) {
         sim.wave_clock = 0.0;
         sim.round.message = Some(crate::round::Message { text: format!("Wave {}", sim.round.wave), color: Color::WHITE, age: 0.0 });
         for (i, (costume, kind)) in wave.iter().enumerate() {
+            // Debug: GB_WAVES_TYPE=1|2 forces every enemy to Big / Tiny.
+            let forced = std::env::var("GB_WAVES_TYPE").ok().and_then(|v| v.parse::<u8>().ok());
+            let kind = &forced.unwrap_or(*kind);
             let at = sim.spawn_points[(sim.next_spawn + i) % sim.spawn_points.len()];
             // Reuse a parked AI slot of the same beast type, otherwise spawn a new one.
             let free = (humans..sim.actors.len()).find(|&j| {
@@ -1208,8 +1211,16 @@ fn bot_inputs(sim: &mut Sim) {
             }
         }
         // AIProfile per beast type: NormalAI punch delay 1.5, TinyAI 0.75, BigAI 2.0.
-        let delay = delay_override.unwrap_or(match sim.actor_variant.get(k).copied().unwrap_or(0) { 2 => 0.75, 1 => 2.0, _ => 1.5 });
-        let (WINDUP, PUNCH, RESET) = (0.2 * delay, 0.1 * delay, 0.2 * delay);
+        // (punchDelay, punchWindup, moveSpeed, punchForce, reach) from the three AIProfile assets.
+        let (pdelay, windup, move_speed, force, reach) = match sim.actor_variant.get(k).copied().unwrap_or(0) {
+            2 => (0.75, 0.1, 4.0_f32, 0.3, 0.4),
+            1 => (2.0, 1.0, 0.5, 10.0, 0.2),
+            _ => (1.5, 0.2, 1.0, 1.0, 0.4),
+        };
+        sim.actors[k].punch_modifier = force;
+        let delay = delay_override.unwrap_or(pdelay);
+        let (WINDUP, PUNCH, RESET) = (windup * delay, 0.1 * delay, 0.2 * delay);
+        let _ = reach;
         let bot = sim.bots.entry(k).or_default();
         let Some((dist, target)) = best else {
             sim.inputs[k].set(&[], 0.0, 0.0);
@@ -1255,7 +1266,7 @@ fn bot_inputs(sim: &mut Sim) {
         }
         // Do not walk off a ledge: probe the ground a step ahead along the heading is not available without raycasts,
         // so slow down when already lower than the target by a lot (it is below us).
-        let mut speed = if near { 0.0 } else { 1.0 };
+        let mut speed = if near { 0.0 } else { move_speed.min(1.0) };
         // Ledge check (stand-in for the real NavMesh): probe the ground 1 m ahead; if it is more than 2.5 m below the
         // hips (or missing) and the target is not down there, stop at the edge.
         if speed > 0.0 && dir != Vec3::ZERO {

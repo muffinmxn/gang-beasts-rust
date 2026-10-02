@@ -496,7 +496,7 @@ fn bind(
                                 .find(|(_, entity)| *entity == beast_bone)
                                 .map(|(node, _)| *node)
                             {
-                                let bind = bind_world(sim.beast_sidecar_of(piece.actor), bone_node);
+                                let bind = bind_world(sim.beast_sidecar(), bone_node);
                                 let local = bind.inverse() * kid_world.affine();
                                 let (scale, rotation, translation) =
                                     local.to_scale_rotation_translation();

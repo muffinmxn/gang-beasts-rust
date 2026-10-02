@@ -416,6 +416,8 @@ pub struct Actor {
     pub last_state: u32,
     pub applyed_force: f32,
     pub input_spam_force_modifier: f32,
+    /// AIProfile `_punchForceModifer` (1 for humans / NormalAI; TinyAI 0.3, BigAI 10).
+    pub punch_modifier: f32,
     pub control: Control,
     pub movement: Movement,
     pub status: Status,
@@ -452,6 +454,7 @@ impl Actor {
             last_state: 0,
             applyed_force: 1.0,
             input_spam_force_modifier: 1.0,
+            punch_modifier: 1.0,
             control: Control::default(),
             movement: Movement::default(),
             status: Status::default(),
@@ -1081,7 +1084,7 @@ impl Actor {
         let ism = self.input_spam_force_modifier;
         // Strike strength scale (`GB_PUNCH_SCALE`, in-game panel). The 30/40/50 forces below are
         // the ported source values; 1.0 = authored.
-        let strength: f32 = punch_scale();
+        let strength: f32 = punch_scale() * self.punch_modifier;
         let hand_position = w.pose(self.body(hand)).position;
         let (direction, hand_force) = if let Some(target) = self.upper_interest {
             let point = w.closest_point(target, hand_position);
