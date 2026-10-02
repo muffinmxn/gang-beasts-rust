@@ -17,6 +17,7 @@ const COSTUME_EDITOR: &str = "Managers/Menu/Costume Menu/Canvas/Costumes Root/Co
 const LOBBY: &str = "Managers/Menu/Beast Menu/Canvas/Local Beast Select Menu";
 const GRAPHICS: &str = "graphics";
 const CONTROLS: &str = "controls";
+const AUDIO: &str = "audio";
 const CREDITS: &str = "credits";
 const FOV_DEGREES: f32 = 40.0;
 const COSTUME_COLOR_ITEM: usize = usize::MAX;
@@ -81,6 +82,10 @@ pub struct Menu {
     bots: usize,
     item_keys: HashMap<usize, String>,
     root: PathBuf,
+    /// Audio settings, 0..=10 steps (master / music / effects). Persisted in the lobby prefs file.
+    pub vol_master: u32,
+    pub vol_music: u32,
+    pub vol_sfx: u32,
     dirty: bool,
     resolution: usize,
     vsync: bool,
@@ -727,7 +732,7 @@ fn setup(
     let settings_camera = screens.get(SETTINGS).map_or(Transform::IDENTITY, |s| s.camera);
     screens.insert(SETTINGS, option_screen(settings_camera, &[
         ("", "Settings"), ("SETTINGS_GRAPHICS", "Graphics"),
-        ("SETTINGS_INPUT", "Controls"), ("SETTINGS_RESET", "Reset settings"),
+        ("SETTINGS_AUDIO", "Audio"), ("SETTINGS_INPUT", "Controls"), ("SETTINGS_RESET", "Reset settings"),
         ("BACK_MAIN", "Back")], &mut item_keys));
     screens.insert(GRAPHICS, option_screen_spaced(settings_camera, &[
         ("", "Graphics"), ("SETTINGS_GRAPHICS_RESOLUTION", "Resolution"),
@@ -745,6 +750,9 @@ fn setup(
         ("SETTINGS_GRAPHICS_GRAIN", "Grain"),
         ("SETTINGS_GRAPHICS_VIGNETTE", "Vignette"),
         ("BACK_SETTINGS", "Back")], &mut item_keys, 340.0, 46.0, 32.0));
+    screens.insert(AUDIO, option_screen(settings_camera, &[
+        ("", "Audio"), ("SETTINGS_AUDIO_MASTER", "Master"), ("SETTINGS_AUDIO_MUSIC", "Music"),
+        ("SETTINGS_AUDIO_SFX", "Effects"), ("BACK_SETTINGS", "Back")], &mut item_keys));
     screens.insert(CONTROLS, option_screen(settings_camera, &[
         ("", "Controls"), ("", "WASD / arrows: move"),
         ("", "Space: jump   Shift: lift"), ("", "C / Ctrl: duck   F: kick"),
@@ -768,7 +776,7 @@ fn setup(
             item: Some(back_id), color: NORMAL, loading: false });
     }
     let start = match std::env::var("GB_MENU_SCREEN").as_deref() {
-        Ok("settings") => SETTINGS, Ok("graphics") => GRAPHICS, Ok("controls") => CONTROLS,
+        Ok("settings") => SETTINGS, Ok("audio") => AUDIO, Ok("graphics") => GRAPHICS, Ok("controls") => CONTROLS,
         Ok("costumes") => COSTUME_EDITOR, Ok("lobby") => LOBBY, Ok("credits") => CREDITS,
         Ok("splash") => SPLASH,
         _ => MAIN,
@@ -809,6 +817,9 @@ fn setup(
         .min(palette_len.saturating_sub(1)),
         item_keys,
         root: root.0.clone(),
+        vol_master: prefs["vol_master"].as_u64().map_or(DEFAULT_VOL.0, |v| v.min(10) as u32),
+        vol_music: prefs["vol_music"].as_u64().map_or(DEFAULT_VOL.1, |v| v.min(10) as u32),
+        vol_sfx: prefs["vol_sfx"].as_u64().map_or(DEFAULT_VOL.2, |v| v.min(10) as u32),
         dirty: true,
         resolution: 0,
         vsync: true,
@@ -1559,6 +1570,17 @@ fn input(
             }
         }
     }
+    if (left || right || ok) && menu.current == AUDIO {
+        let step = |v: u32| if right || ok && !left { (v + 1).min(10) } else { v.saturating_sub(1) };
+        match key.as_str() {
+            "SETTINGS_AUDIO_MASTER" => menu.vol_master = step(menu.vol_master),
+            "SETTINGS_AUDIO_MUSIC" => menu.vol_music = step(menu.vol_music),
+            "SETTINGS_AUDIO_SFX" => menu.vol_sfx = step(menu.vol_sfx),
+            _ => {}
+        }
+        save_prefs_audio(&menu);
+        menu.dirty = true;
+    }
     if (left || right || ok) && menu.current == GRAPHICS {
         let mut changed = true;
         let step = |v: usize, n: usize| if right { (v + 1) % n } else if left { (v + n - 1) % n } else { v };
@@ -1592,6 +1614,7 @@ fn input(
             "BACK_MAIN" => menu.go(MAIN),
             "BACK_SETTINGS" => menu.go(SETTINGS),
             "SETTINGS_GRAPHICS" => menu.go(GRAPHICS),
+            "SETTINGS_AUDIO" => menu.go(AUDIO),
             "SETTINGS_INPUT" => menu.go(CONTROLS),
             "SETTINGS_RESET" => {
                 // Reset every graphics row to its default; `apply_graphics` pushes them out.
@@ -1695,7 +1718,7 @@ fn input(
     if back {
         match menu.current {
             LOBBY | SETTINGS | COSTUME_EDITOR | CREDITS => menu.go(MAIN),
-            GRAPHICS | CONTROLS => menu.go(SETTINGS),
+            GRAPHICS | CONTROLS | AUDIO => menu.go(SETTINGS),
             MAIN => {}
             _ => {}
         }
@@ -1902,6 +1925,9 @@ fn layout(
                     .cloned()
                     .unwrap_or_else(|| "Rooftop".to_string()),
             ),
+            Some("SETTINGS_AUDIO_MASTER") => Some(format!("Master: {}%", menu.vol_master * 10)),
+            Some("SETTINGS_AUDIO_MUSIC") => Some(format!("Music: {}%", menu.vol_music * 10)),
+            Some("SETTINGS_AUDIO_SFX") => Some(format!("Effects: {}%", menu.vol_sfx * 10)),
             Some("SETTINGS_GRAPHICS_RESOLUTION") | Some("RESOLUTION") => {
                 let (w, h) = RESOLUTIONS[menu.resolution.min(RESOLUTIONS.len() - 1)];
                 Some(format!("Resolution: {w} x {h}"))
@@ -1966,14 +1992,13 @@ fn layout(
 }
 
 /// Stages a mode can be played on. Waves needs the stage's wave entrance / `GamemodeEnabled` Waves objects
-/// (rooftop, subway, grind, incinerator, chute, aquarium); Soccer is Alley's; Rumble is the Ring's.
+/// (rooftop, subway, grind, incinerator, chute, aquarium); Soccer is Alley's.
 fn stage_allowed(mode: crate::round::Mode, stage: &str) -> bool {
     use crate::round::Mode;
     match mode {
         Mode::Waves => ["rooftop", "subway", "grind", "incinerator"].contains(&stage),
         Mode::Soccer => stage == "alley",
-        Mode::Rumble => stage == "ring",
-        _ => stage != "alley" && stage != "ring" || stage == "ring",
+        _ => stage != "alley",
     }
 }
 
@@ -2014,6 +2039,20 @@ fn write_prefs(value: &serde_json::Value) {
         let _ = std::fs::create_dir_all(dir);
     }
     let _ = std::fs::write(path, serde_json::to_vec_pretty(value).unwrap_or_default());
+}
+
+/// Default audio mix (master, music, effects) in tenths; the game is mixed quietly so music sits under the effects.
+pub const DEFAULT_VOL: (u32, u32, u32) = (5, 3, 6);
+
+fn save_prefs_audio(menu: &Menu) {
+    let mut value = load_prefs();
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["vol_master"] = menu.vol_master.into();
+    value["vol_music"] = menu.vol_music.into();
+    value["vol_sfx"] = menu.vol_sfx.into();
+    write_prefs(&value);
 }
 
 fn save_prefs(menu: &Menu) {

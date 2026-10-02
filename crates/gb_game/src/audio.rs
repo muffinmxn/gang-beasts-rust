@@ -20,6 +20,9 @@ pub struct Sfx {
     /// Where the listener (camera) is, for distance attenuation of positional sounds.
     pub listener: Vec3,
     pub master: f32,
+    /// Music / effects sliders (0..1), multiplied with `master`.
+    pub music_gain: f32,
+    pub sfx_gain: f32,
     pub enabled: bool,
 }
 
@@ -74,7 +77,7 @@ impl AudioLib {
 struct SfxVoice;
 
 #[derive(Component)]
-pub struct MusicVoice;
+pub struct MusicVoice(pub f32);
 
 pub fn plugin(app: &mut App, root: &Path) {
     let index: HashMap<String, serde_json::Value> = std::fs::read(root.join("audio-index.json"))
@@ -94,7 +97,11 @@ pub fn plugin(app: &mut App, root: &Path) {
         info!("audio: no extracted clips (run tools/extract/audio.py); running silent");
     }
     info!("audio: {} clips indexed", index.len());
-    let master = std::env::var("GB_VOLUME").ok().and_then(|v| v.parse().ok()).unwrap_or(0.8);
+    let prefs = crate::menu::load_prefs();
+    let tenth = |k: &str, d: u32| prefs[k].as_u64().map_or(d, |v| v.min(10) as u32) as f32 / 10.0;
+    let d = crate::menu::DEFAULT_VOL;
+    let master = std::env::var("GB_VOLUME").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| tenth("vol_master", d.0));
+    let (music_gain, sfx_gain) = (tenth("vol_music", d.1), tenth("vol_sfx", d.2));
     let mut families: HashMap<String, Vec<String>> = HashMap::new();
     for name in index.keys() {
         families.entry(family_key(name)).or_default().push(name.clone());
@@ -104,8 +111,26 @@ pub fn plugin(app: &mut App, root: &Path) {
     }
     let files: HashMap<String, String> = files;
     app.insert_resource(AudioLib { files, config, root: root.to_path_buf(), families })
-        .insert_resource(Sfx { master, enabled, ..Default::default() })
-        .add_systems(Update, (track_listener, menu_sounds, music, drain).chain());
+        .insert_resource(Sfx { master, music_gain, sfx_gain, enabled, ..Default::default() })
+        .add_systems(Update, (track_listener, sync_volume, menu_sounds, music, retune_music, drain).chain());
+}
+
+/// The Settings > Audio sliders take effect immediately (the match process reads the saved values at start-up).
+fn sync_volume(menu: Option<Res<crate::menu::Menu>>, mut sfx: ResMut<Sfx>) {
+    if let Some(m) = menu {
+        if std::env::var_os("GB_VOLUME").is_none() {
+            sfx.master = m.vol_master as f32 / 10.0;
+        }
+        sfx.music_gain = m.vol_music as f32 / 10.0;
+        sfx.sfx_gain = m.vol_sfx as f32 / 10.0;
+    }
+}
+
+/// Re-applies the mix to the music voices that are already playing.
+fn retune_music(sfx: Res<Sfx>, mut voices: Query<(&MusicVoice, &mut AudioSink)>) {
+    for (v, mut sink) in &mut voices {
+        sink.set_volume(Volume::Linear(v.0 * sfx.master * sfx.music_gain));
+    }
 }
 
 fn track_listener(cameras: Query<&GlobalTransform, With<Camera3d>>, mut sfx: ResMut<Sfx>) {
@@ -135,7 +160,7 @@ fn drain(
             continue;
         }
         sfx.last.insert(c.clip.clone(), now);
-        let mut volume = c.volume * sfx.master;
+        let mut volume = c.volume * sfx.master * sfx.sfx_gain;
         if let Some(p) = c.pos {
             volume /= 1.0 + (p - sfx.listener).length() / 18.0;
         }
@@ -199,7 +224,7 @@ fn music(
     let key;
     if menu.is_some() {
         key = "menu".to_string();
-        layers.push(("GB Days Anthem".into(), 0.15));
+        layers.push(("GB Days Anthem".into(), 0.6));
     } else if let Some(sim) = sim {
         // Even rounds play the A side, odd rounds the B side; the drums join when the fight narrows to two.
         let rounds: u32 = sim.round.wins.iter().sum();
@@ -212,13 +237,13 @@ fn music(
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
                 if let Some(music) = v["music"].as_object().and_then(|m| m.values().next()) {
                     if let Some(c) = music[if b_side { "bSide" } else { "aSide" }].as_str().or(music["aSide"].as_str()) {
-                        layers.push((c.to_string(), 0.18));
+                        layers.push((c.to_string(), 0.7));
                     }
                     if let (true, Some(c)) = (drums, music["drums"].as_str()) {
-                        layers.push((c.to_string(), 0.16));
+                        layers.push((c.to_string(), 0.5));
                     }
                     if let Some(c) = music["ambience"].as_str() {
-                        layers.push((c.to_string(), 0.3));
+                        layers.push((c.to_string(), 0.5));
                     }
                 }
                 let mut seen = std::collections::HashSet::new();
@@ -226,7 +251,7 @@ fn music(
                     let (Some(clip), true) = (c["ptrs"]["clip"].as_str(), c["loop"].as_i64() == Some(1)) else { continue };
                     if seen.insert(clip.to_string()) {
                         let vol = c["volume"].as_f64().unwrap_or(0.3) as f32;
-                        layers.push((clip.to_string(), (vol * 0.5).clamp(0.02, 0.35)));
+                        layers.push((clip.to_string(), (vol * 0.8).clamp(0.05, 0.6)));
                     }
                 }
             }
@@ -244,9 +269,9 @@ fn music(
     for (clip, volume) in layers {
         if let Some(file) = lib.files.get(&clip) {
             commands.spawn((
-                MusicVoice,
+                MusicVoice(volume),
                 AudioPlayer::<AudioSource>(assets.load(format!("audio/{file}"))),
-                PlaybackSettings::LOOP.with_volume(Volume::Linear(volume * sfx.master / 0.8)),
+                PlaybackSettings::LOOP.with_volume(Volume::Linear(volume * sfx.master * sfx.music_gain)),
             ));
         }
     }

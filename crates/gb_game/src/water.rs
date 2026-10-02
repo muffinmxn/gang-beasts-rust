@@ -144,7 +144,7 @@ fn convert_seas(
                     bump_tiling: v4(sea, "_BumpTiling", [0.15; 4]),
                     bump_dir: v4(sea, "_BumpDirection", [-20.0, -20.0, 10.0, 10.0]),
                     misc: Vec4::new(
-                        sea["floats"]["_GerstnerIntensity"].as_f64().unwrap_or(1.0) as f32 * knob("GB_WAVE_HEIGHT", 1.0),
+                        sea["floats"]["_GerstnerIntensity"].as_f64().unwrap_or(1.0) as f32 * knob("GB_WAVE_HEIGHT", 0.3),
                         knob("GB_WAVE_TIME", 1.0),
                         knob("GB_WAVE_BUMP", 0.35),
                         knob("GB_WAVE_FOAM", 0.5),

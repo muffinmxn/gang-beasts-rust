@@ -94,7 +94,6 @@ pub struct Sim {
     pub lobby_ready: Vec<bool>,
     /// Waves mode clock (seconds since the last wave was cleared / started).
     wave_clock: f32,
-    rumble_spawns: Vec<Transform>,
     /// Costumes requested for wave beasts: (actor, preset name), consumed by `costume::wave_costumes`.
     pub wave_costumes: Vec<(usize, String)>,
     /// Stage reloads so far (stage events re-initialise on change).
@@ -458,7 +457,6 @@ pub fn build(
         device_actor: HashMap::new(),
         lobby_ready: vec![],
         wave_clock: 0.0,
-        rumble_spawns: vec![],
         wave_costumes: vec![],
         reloads: 0,
         stage_name: stage.to_string(),
@@ -964,48 +962,6 @@ fn auto_raw(sim: &Sim) -> Option<Raw> {
 /// Keyboard + mouse: WASD/arrows, Space jump, Ctrl duck/headbutt, F kick, Shift lift, LMB/RMB arms.
 /// `GameMode_Waves` (simplified): every wave spawns `2 + wave` AI beasts at the stage spawn points; the next wave starts
 /// 5 s after the last AI falls. AI chase the nearest living player and punch when close.
-/// `RumbleData` "Default" (core-globalassets): `spawnTime` 30 s, wrestler fallback costumes. Entrants come from the
-/// Ring's `RumbleSpawns/SpawnLeft|SpawnRight` and walk into the ring. `GB_RUMBLE_SPAWN_TIME` overrides.
-const RUMBLE_ENTRANTS: u32 = 6;
-const RUMBLE_COSTUMES: [&str; 4] = ["WRESTLER 1", "WRESTLER 2", "WRESTLER 3", "WRESTLER 4"];
-
-fn rumble(sim: &mut Sim) {
-    let dt = sim.world.settings.fixed_timestep;
-    let spawn_time = std::env::var("GB_RUMBLE_SPAWN_TIME").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(30.0);
-    if sim.wave_clock == 0.0 && sim.round.wave == 0 {
-        sim.round.rumble_entrants_left = RUMBLE_ENTRANTS;
-        // Entrance spawns from the stage (fall back to the regular spawn points).
-        let poses = sim.scenes[0].1.world_poses(Pose::IDENTITY);
-        sim.rumble_spawns = sim.scenes[0]
-            .1
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| n.path.contains("RumbleSpawns/SpawnLeft") || n.path.contains("RumbleSpawns/SpawnRight"))
-            .map(|(i, _)| Transform::from_translation(mirror_position(poses[i].position)))
-            .collect();
-    }
-    sim.wave_clock += dt;
-    if sim.round.rumble_entrants_left == 0 || sim.wave_clock < spawn_time {
-        return;
-    }
-    sim.wave_clock = 0.001;
-    sim.round.wave += 1;
-    sim.round.rumble_entrants_left -= 1;
-    // The real entrants walk in from the tunnel via BeastDirector paths (no NavMesh here): drop them into the ring.
-    let points = if sim.spawn_points.is_empty() { sim.rumble_spawns.clone() } else { sim.spawn_points.clone() };
-    let at = points[sim.round.wave as usize % points.len().max(1)];
-    match sim.spawn_beast(at) {
-        Ok(k) => {
-            let name = RUMBLE_COSTUMES[sim.round.wave as usize % RUMBLE_COSTUMES.len()];
-            sim.wave_costumes.push((k, name.to_string()));
-            sim.round.message = Some(crate::round::Message { text: "A new challenger!".into(), color: Color::WHITE, age: 0.0 });
-            info!("rumble: entrant {} ({} left)", sim.round.wave, sim.round.rumble_entrants_left);
-        }
-        Err(e) => error!("rumble spawn failed: {e}"),
-    }
-}
-
 /// The game's `WavesData` "Default" asset (core-globalassets): four waves of 1, 2, 3 and 4 beasts; wave 1 is a fire
 /// fighter, wave 2 riot police, the rest wear the fallback costumes. Surviving every wave wins the match.
 /// (costume, beast type): type 0 normal, 1 Big (`beastTypePref[1]`), 2 Tiny. Wave 2 is a normal and a Big riot cop.
@@ -1320,7 +1276,6 @@ fn mode_hud(
     }
     let text = match sim.round.mode {
         crate::round::Mode::Soccer => format!("RED  {}  -  {}  BLUE", sim.soccer_score[0], sim.soccer_score[1]),
-        crate::round::Mode::Rumble => format!("RUMBLE   {} more to enter", sim.round.rumble_entrants_left),
         crate::round::Mode::Waves => {
             let left = (sim.round.players.min(sim.actors.len())..sim.actors.len())
                 .filter(|&k| crate::round::alive(sim.actors[k].state) && !sim.parked[k])
@@ -1712,10 +1667,6 @@ fn simulate(
     // Soccer goals / respawns.
     if sim.round.mode == crate::round::Mode::Soccer && !sim.lobby {
         soccer(sim);
-    }
-    // Rumble: entrants.
-    if sim.round.mode == crate::round::Mode::Rumble && !sim.lobby {
-        rumble(sim);
     }
     // Waves mode: AI beasts, wave director.
     if sim.round.mode == crate::round::Mode::Waves && !sim.lobby {

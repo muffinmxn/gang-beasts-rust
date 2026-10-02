@@ -34,12 +34,10 @@ pub enum Mode {
     Waves,
     /// `GameMode_Football` ("Soccer", played on the Alley pitch): two teams, score goals with the ball.
     Soccer,
-    /// `GameMode_Rumble` (Ring): AI wrestlers keep entering every `spawnTime` s; last beast standing wins.
-    Rumble,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 5] = [Mode::Melee, Mode::Gang, Mode::Waves, Mode::Soccer, Mode::Rumble];
+    pub const ALL: [Mode; 4] = [Mode::Melee, Mode::Gang, Mode::Waves, Mode::Soccer];
 
     pub fn id(self) -> &'static str {
         match self {
@@ -47,7 +45,6 @@ impl Mode {
             Mode::Gang => "gang",
             Mode::Waves => "waves",
             Mode::Soccer => "football",
-            Mode::Rumble => "rumble",
         }
     }
 
@@ -62,7 +59,6 @@ impl Mode {
             Mode::Gang => "Gang",
             Mode::Waves => "Waves",
             Mode::Soccer => "Soccer",
-            Mode::Rumble => "Rumble",
         }
     }
 
@@ -70,7 +66,7 @@ impl Mode {
     /// (`SetBalancedTeams`); melee is one gang per fighter.
     pub fn team_of(self, k: usize) -> usize {
         match self {
-            Mode::Melee | Mode::Rumble => k,
+            Mode::Melee => k,
             Mode::Gang | Mode::Soccer => k % 2,
             // Local players are team 0; AI beasts (appended after them) are team 1 - see `Round::team`.
             Mode::Waves => k,
@@ -110,8 +106,6 @@ pub struct Round {
     /// Number of human-controlled beasts (the rest are Waves AI).
     pub players: usize,
     pub wave: u32,
-    /// Rumble: wrestlers still to enter.
-    pub rumble_entrants_left: u32,
 }
 
 impl Round {
@@ -135,7 +129,6 @@ impl Round {
             mode: Mode::from_id(&std::env::var("GB_MODE").unwrap_or_default()),
             players: usize::MAX,
             wave: 0,
-            rumble_entrants_left: 0,
         }
     }
 
@@ -156,10 +149,6 @@ impl Round {
                 self.round_time += dt;
                 if self.mode == Mode::Soccer {
                     // Soccer: the score is driven by goals (`play::soccer`); nobody is eliminated.
-                    return;
-                }
-                if self.mode == Mode::Rumble && self.rumble_entrants_left > 0 {
-                    // Rumble: the round cannot end while wrestlers are still due to enter.
                     return;
                 }
                 if self.mode == Mode::Waves {
@@ -593,23 +582,6 @@ mod tests {
             r.step(0.02, &[true, false], &colors);
         }
         assert_eq!(r.phase, Phase::Playing);
-    }
-
-    #[test]
-    fn rumble_waits_for_all_entrants() {
-        let mut r = Round::new(vec!["Red".into(), "Blue".into()]);
-        r.mode = Mode::Rumble;
-        r.rumble_entrants_left = 3;
-        let colors = [Color::WHITE; 2];
-        for _ in 0..300 {
-            r.step(0.02, &[true, false], &colors);
-        }
-        assert_eq!(r.phase, Phase::Playing);
-        r.rumble_entrants_left = 0;
-        for _ in 0..30 {
-            r.step(0.02, &[true, false], &colors);
-        }
-        assert_ne!(r.phase, Phase::Playing);
     }
 
     #[test]

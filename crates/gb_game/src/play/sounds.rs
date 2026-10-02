@@ -230,7 +230,7 @@ pub fn contact_sounds(sim: &mut Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &A
                     let weight = if speed > 9.0 { "HEAVY" } else { "LIGHT" };
                     if let Some(clip) = st.pick_family(lib, &format!("GB PUNCH SFX XTRA {area} {weight}")) {
                         let r = st.rand();
-                        sfx.play_at(&clip, (0.35 + speed * 0.05).min(1.2), 0.92 + 0.16 * r, at);
+                        sfx.play_at(&clip, (0.3 + speed * 0.03).min(0.8), 0.92 + 0.16 * r, at);
                     }
                     // The one that got hit grunts now and then.
                     if speed > 6.0 && now - st.last_voice.get(&b).copied().unwrap_or(-9.0) > 1.4 {
@@ -278,7 +278,7 @@ pub fn contact_sounds(sim: &mut Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &A
                     continue;
                 }
                 let clip = list[(r0 * list.len() as f32) as usize % list.len()].clone();
-                let volume = (vol * 3.0 * (speed / e.hard_threshold.max(1.0)).clamp(0.35, 1.5)).min(1.2);
+                let volume = (vol * 2.2 * (speed / e.hard_threshold.max(1.0)).clamp(0.35, 1.5)).min(1.2);
                 sfx.play_at(&clip, volume, pitch(range, r1), at);
             }
             _ => {}
