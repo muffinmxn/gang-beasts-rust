@@ -114,6 +114,19 @@ struct Fan {
     clock: f32,
 }
 
+/// `Crane_RandomPointMover` (simplified base movement): offset along the gantry axis, retargeted every
+/// `stateChangeDelayMin..Max` seconds within `maxDistanceBaseCanMove`, at `baseMovementSpeed`.
+struct CraneMove {
+    bodies: Vec<(usize, Iso)>,
+    axis: Vec3,
+    offset: f32,
+    target: f32,
+    max: f32,
+    speed: f32,
+    delay: (f32, f32),
+    next: f32,
+}
+
 /// `Elevators_Car` (simplified): the car shuttles between its `floors` (metres above the first one), pausing at
 /// each, as a kinematic body. The malfunction / cable-snap / fall sequence of `Elevators_Logic` is not ported.
 struct Lift {
@@ -231,6 +244,7 @@ pub struct StageEvents {
     props: Vec<PropSpawner>,
     track: Option<Track>,
     lifts: Vec<Lift>,
+    cranes: Vec<CraneMove>,
     /// `Elevators_Logic` malfunction: (time it happens, which car).
     lift_failure: Option<(f32, usize)>,
     fans: Vec<Fan>,
@@ -501,6 +515,20 @@ pub fn stage_events(
             state.lifts.remove(car);
             state.lift_failure = None;
             info!("elevator {car} malfunction: cable snapped");
+        }
+    }
+    // Cranes.
+    for i in 0..state.cranes.len() {
+        let (r1, r2) = (state.rand01(), state.rand01());
+        let c = &mut state.cranes[i];
+        if now >= c.next {
+            c.target = (r1 * 2.0 - 1.0) * c.max;
+            c.next = now + c.delay.0 + r2 * (c.delay.1 - c.delay.0);
+        }
+        let step = c.speed * dt;
+        c.offset += (c.target - c.offset).clamp(-step, step);
+        for (b, rest) in &c.bodies {
+            sim.world.move_kinematic(*b, Iso::new(rest.position + c.axis * c.offset, rest.rotation));
         }
     }
     // Elevator cars.
@@ -987,10 +1015,12 @@ fn init(
     if std::env::var_os("GB_NO_HOLD").is_none() {
         let inst = sim.scenes[0].0;
         let mut frozen = 0;
+        let mut frozen_bodies: HashSet<usize> = HashSet::new();
         let mut freeze = |sim: &mut Sim, node: usize| {
             if let Some(&body) = sim.world.instances[inst].bodies.get(&node) {
                 sim.world.set_kinematic(body, true);
                 frozen += 1;
+                frozen_bodies.insert(body);
             }
         };
         for (i, node) in nodes.iter().enumerate() {
@@ -1017,6 +1047,56 @@ fn init(
         }
         if frozen > 0 {
             info!("stage events: {frozen} scripted body(ies) held in place");
+        }
+        // Crane_RandomPointMover: driven cranes slide their whole (held) assembly along the gantry rails.
+        let poses_c = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
+        let movers: Vec<serde_json::Value> = nodes
+            .iter()
+            .flat_map(|n| n.components.iter().filter(|c| c.script.as_deref() == Some("Crane_RandomPointMover")))
+            .map(|c| c.data.clone())
+            .collect();
+        for mover in &movers {
+            let Some(root) = mover["crane"]["node"].as_u64().map(|n| n as usize) else { continue };
+            let mut bodies = Vec::new();
+            for (j, _) in nodes.iter().enumerate() {
+                let mut cur = Some(j);
+                let mut under = false;
+                while let Some(c) = cur {
+                    if c == root {
+                        under = true;
+                        break;
+                    }
+                    cur = nodes[c].parent;
+                }
+                if !under {
+                    continue;
+                }
+                if let Some(&b) = sim.world.instances[inst].bodies.get(&j) {
+                    if frozen_bodies.contains(&b) {
+                        bodies.push((b, sim.world.pose(b)));
+                    }
+                }
+            }
+            if bodies.is_empty() {
+                continue;
+            }
+            let axis = (poses_c[root].rotation * Vec3::X).normalize_or_zero();
+            state.cranes.push(CraneMove {
+                bodies,
+                axis,
+                offset: 0.0,
+                target: 0.0,
+                max: mover["maxDistanceBaseCanMove"].as_f64().unwrap_or(4.0) as f32,
+                speed: mover["baseMovementSpeed"].as_f64().unwrap_or(2.0) as f32,
+                delay: (
+                    mover["stateChangeDelayMin"].as_f64().unwrap_or(1.0) as f32,
+                    mover["stateChangeDelayMax"].as_f64().unwrap_or(20.0) as f32,
+                ),
+                next: 5.0,
+            });
+        }
+        if !state.cranes.is_empty() {
+            info!("stage events: {} driven crane(s)", state.cranes.len());
         }
     }
     // Bendable rails / bridge frames (Bendable|VariableBreakJoint chains) are limit-only joints with no
