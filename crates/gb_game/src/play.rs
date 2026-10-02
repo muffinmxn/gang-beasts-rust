@@ -98,6 +98,8 @@ pub struct Sim {
     pub wave_costumes: Vec<(usize, String)>,
     /// Stage reloads so far (stage events re-initialise on change).
     pub reloads: u32,
+    /// Cached Waves entrance door (computed on first use).
+    wave_door_cache: Option<Option<(Vec3, Vec3)>>,
     bots: HashMap<usize, Bot>,
     /// Lobby: backed out; bodies out of the simulation and hidden until the slot is reused.
     pub parked: Vec<bool>,
@@ -456,6 +458,7 @@ pub fn build(
         rumble_spawns: vec![],
         wave_costumes: vec![],
         reloads: 0,
+        wave_door_cache: None,
         bots: HashMap::new(),
         parked: vec![],
         cam_forward: Vec3::Z,
@@ -1039,7 +1042,7 @@ fn wave_entrances(sim: &Sim) -> Vec<Transform> {
             .filter(|p| (*p - base.position).length() < 6.0)
             .min_by(|a, b| (*a - base.position).length().total_cmp(&(*b - base.position).length()));
         for off in slots {
-            let at = if let Some(door) = door {
+            let at = if let (Some(door), true) = (door, std::env::var_os("GB_WAVE_OUTSIDE").is_some()) {
                 let dir = Vec3::new(door.x - base.position.x, 0.0, door.z - base.position.z).normalize_or_zero();
                 let side = Vec3::new(-dir.z, 0.0, dir.x);
                 Vec3::new(door.x, base.position.y, door.z) + dir * (0.2 - off.z * 0.5) + side * off.x
@@ -1052,12 +1055,69 @@ fn wave_entrances(sim: &Sim) -> Vec<Transform> {
     out
 }
 
+/// The Waves entrance door in physics space: (door position, direction out of the room onto the stage).
+fn wave_door(sim: &mut Sim) -> Option<(Vec3, Vec3)> {
+    if let Some(c) = sim.wave_door_cache {
+        return c;
+    }
+    let r = wave_door_compute(sim);
+    sim.wave_door_cache = Some(r);
+    r
+}
+
+fn wave_door_compute(sim: &Sim) -> Option<(Vec3, Vec3)> {
+    let src = &sim.scenes[0].1;
+    let poses = src.world_poses(Pose::IDENTITY);
+    let spawn = src.nodes.iter().enumerate().find(|(_, n)| {
+        n.path.to_ascii_lowercase().contains("wave")
+            && n.components.iter().any(|c| matches!(c.script.as_deref(), Some("GBGangSpawnPoint") | Some("GBSpawnPoint")))
+    })?;
+    let base = poses[spawn.0].position;
+    let door = src
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| d.path.ends_with("Door (Solid)") || d.path.ends_with("/Door"))
+        .map(|(j, _)| poses[j].position)
+        .filter(|p| (*p - base).length() < 6.0)
+        .min_by(|a, b| (*a - base).length().total_cmp(&(*b - base).length()))?;
+    let out = Vec3::new(door.x - base.x, 0.0, door.z - base.z).normalize_or_zero();
+    (out != Vec3::ZERO).then_some((door, out))
+}
+
 fn waves(sim: &mut Sim) {
     let humans = sim.round.players.min(sim.actors.len());
     if humans == 0 || sim.spawn_points.is_empty() || sim.round.game_over {
         return;
     }
     let dt = sim.world.settings.fixed_timestep;
+    // The spawn room behind the door is off limits to the humans: anyone who steps in is pushed back out.
+    if let Some((door, out)) = wave_door(sim) {
+        let side = Vec3::new(-out.z, 0.0, out.x);
+        // Debug: GB_WAVE_TEST_ENTER drops human 0 into the room at step 150 (exercises the keep-out push).
+        if std::env::var_os("GB_WAVE_TEST_ENTER").is_some() && sim.world.steps == 150 && humans > 0 {
+            for p in Part::ALL {
+                let b = sim.actors[0].beast.body(p);
+                let pose = sim.world.pose(b);
+                sim.world.teleport(b, Iso::new(Vec3::new(door.x, pose.position.y, door.z) - out * 2.0, pose.rotation));
+            }
+        }
+        for k in 0..humans {
+            if sim.parked[k] || !crate::round::alive(sim.actors[k].state) {
+                continue;
+            }
+            let hips = sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position;
+            let rel = hips - door;
+            let along = rel.dot(out);
+            if along < 0.2 && along > -5.0 && rel.dot(side).abs() < 1.5 && rel.y < 3.0 {
+                let accel = 40.0 + 30.0 * (0.2 - along).min(2.0);
+                for p in Part::ALL {
+                    let b = sim.actors[k].beast.body(p);
+                    sim.world.add_force(b, out * accel, 5);
+                }
+            }
+        }
+    }
     sim.wave_clock += dt;
     // Debug: GB_WAVES_LOSE=1 knocks out the humans 6 s in (exercises the loss -> menu path).
     if std::env::var_os("GB_WAVES_LOSE").is_some() && sim.wave_clock > 6.0 && sim.wave_clock < 6.0 + dt * 1.5 {
@@ -1072,6 +1132,14 @@ fn waves(sim: &mut Sim) {
             if !sim.parked[k] {
                 let Sim { actors, world, .. } = &mut *sim;
                 actors[k].kill(world);
+            }
+        }
+    }
+    if std::env::var_os("GB_WAVE_TRACE").is_some() && sim.world.steps % 60 == 0 {
+        for k in 0..sim.actors.len() {
+            if !sim.parked[k] {
+                let p = sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position;
+                info!("wave trace step {} enemy {k} hips {:.2} {:.2} {:.2}", sim.world.steps, p.x, p.y, p.z);
             }
         }
     }
@@ -1279,6 +1347,7 @@ fn bot_inputs(sim: &mut Sim) {
     let hips: Vec<Vec3> = (0..n).map(|k| sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position).collect();
     let alive: Vec<bool> = (0..n).map(|k| crate::round::alive(sim.actors[k].state) && !sim.parked[k]).collect();
     let mode = sim.round.mode;
+    let wave_door_cached = if mode == crate::round::Mode::Waves { wave_door(sim) } else { None };
     for k in humans..n {
         if !alive[k] {
             sim.inputs[k].set(&[], 0.0, 0.0);
@@ -1332,7 +1401,20 @@ fn bot_inputs(sim: &mut Sim) {
             continue;
         };
         let flat = Vec3::new(target.x - me.x, 0.0, target.z - me.z);
-        let dir = if flat.length() > 0.01 { flat.normalize() } else { Vec3::ZERO };
+        let mut dir = if flat.length() > 0.01 { flat.normalize() } else { Vec3::ZERO };
+        // Waves enemies spawn in the room behind the door: walk out through it before heading for the humans.
+        if mode == crate::round::Mode::Waves {
+            if let Some((door, out)) = wave_door_cached {
+                let rel = me - door;
+                if rel.dot(out) < 0.9 && rel.length() < 9.0 {
+                    let gate = door + out * 1.7;
+                    let to = Vec3::new(gate.x - me.x, 0.0, gate.z - me.z);
+                    if to.length() > 0.05 {
+                        dir = to.normalize();
+                    }
+                }
+            }
+        }
         let near = dist < REACH;
         // Progress / stuck timer.
         if (me - bot.last).length() < 0.4 * dt && !near {
