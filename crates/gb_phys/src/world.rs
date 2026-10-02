@@ -269,6 +269,8 @@ pub struct World {
     /// Joints created at runtime (grabs); None once removed.
     runtime_joints: Vec<Option<*mut PxD6Joint>>,
     all_joints: Vec<*mut PxD6Joint>,
+    /// Scene joints already reported by [`World::new_broken_joints`].
+    reported_broken: std::collections::HashSet<usize>,
     /// Body pairs joined by a joint (own, connected), for the ragdoll self-intersection debug
     /// overlay: a penetrating pair that is NOT joint-connected is a real snag.
     pub joint_links: Vec<(Option<usize>, Option<usize>)>,
@@ -530,6 +532,7 @@ impl World {
                 pre_velocity: Vec::new(),
                 pending_dv: Vec::new(),
                 all_joints: Vec::new(),
+                reported_broken: Default::default(),
                 joint_links: Vec::new(),
                 invulnerable_joints: Vec::new(),
                 drive_limits_are_forces: true,
@@ -1614,6 +1617,20 @@ impl World {
                 )
             };
         }
+    }
+
+    /// Body pairs (own, connected) of scene joints that PhysX broke since the last call (Unity's `OnJointBreak`).
+    pub fn new_broken_joints(&mut self) -> Vec<(Option<usize>, Option<usize>)> {
+        let mut out = Vec::new();
+        for (k, j) in self.all_joints.iter().enumerate() {
+            let broken = unsafe { PxJoint_getConstraintFlags(*j as *const PxJoint).mBits as u32 & PxConstraintFlag::eBROKEN != 0 };
+            if broken && self.reported_broken.insert(*j as usize) {
+                if let Some(link) = self.joint_links.get(k) {
+                    out.push(*link);
+                }
+            }
+        }
+        out
     }
 
     pub fn joint_broken(&self, handle: usize) -> bool {

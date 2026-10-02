@@ -28,6 +28,8 @@ pub struct SoundState {
     built: bool,
     emitters: HashMap<usize, Emitter>,
     parents: Vec<Option<usize>>,
+    /// node -> clips of its `PlaySoundOnJointBreak` GeneralAudioData.
+    break_sounds: HashMap<usize, Vec<String>>,
     rng: u32,
     last_foot: HashMap<usize, f32>,
     last_voice: HashMap<usize, f32>,
@@ -101,7 +103,28 @@ fn build(sim: &Sim, st: &mut SoundState, lib: &AudioLib) {
             },
         );
     }
-    info!("audio: {} impact emitters on {}", st.emitters.len(), sim.stage_name);
+    // PlaySoundOnJointBreak: GeneralAudioData clips played where a scene joint of that object breaks.
+    let mut go_node: HashMap<i64, usize> = HashMap::new();
+    for (i, n) in src.nodes.iter().enumerate() {
+        if let Some(go) = n.components.first().and_then(|c| c.data["m_GameObject"]["m_PathID"].as_i64()) {
+            go_node.entry(go).or_insert(i);
+        }
+    }
+    for c in stage_audio["clips"].as_array().into_iter().flatten() {
+        if c["class"].as_str() != Some("PlaySoundOnJointBreak") {
+            continue;
+        }
+        let (Some(go), Some(name)) = (c["go"].as_i64(), c["ptrs"]["generalAudioData"].as_str()) else { continue };
+        let Some(&node) = go_node.get(&go) else { continue };
+        let clips: Vec<String> = lib.config["GeneralAudioData"][name]["_ptrs"]["clips"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        if !clips.is_empty() {
+            st.break_sounds.insert(node, clips);
+        }
+    }
+    info!("audio: {} impact emitters, {} joint-break sounds on {}", st.emitters.len(), st.break_sounds.len(), sim.stage_name);
 }
 
 fn emitter_key(st: &SoundState, mut node: usize) -> Option<usize> {
@@ -135,15 +158,44 @@ fn footstep_family(surface: &str) -> &'static str {
 }
 
 /// Call once per physics step with that step's contacts.
-pub fn contact_sounds(sim: &Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &AudioLib) {
+pub fn contact_sounds(sim: &mut Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &AudioLib) {
     if std::env::var_os("GB_AUDIO_DEBUG").is_some() && sim.world.steps % 200 == 0 {
         info!("audio: step {} contacts {} enabled {}", sim.world.steps, sim.world.contacts.len(), sfx.enabled);
     }
-    if !sfx.enabled || sim.world.contacts.is_empty() {
+    // Joints that just broke: stage objects with PlaySoundOnJointBreak speak up.
+    let broken = sim.world.new_broken_joints();
+    if !sfx.enabled {
         return;
     }
-    if !st.built {
+    if !st.built && (!sim.world.contacts.is_empty() || !broken.is_empty()) {
         build(sim, st, lib);
+    }
+    for (own, _) in broken {
+        let Some(body) = own else { continue };
+        let Some(node) = sim.world.actors.iter().find(|a| a.body == Some(body)).map(|a| a.node) else { continue };
+        let found = {
+            let mut n = node;
+            let mut found = None;
+            for _ in 0..4 {
+                if st.break_sounds.contains_key(&n) {
+                    found = Some(n);
+                    break;
+                }
+                match st.parents.get(n).copied().flatten() {
+                    Some(p) => n = p,
+                    None => break,
+                }
+            }
+            found
+        };
+        let Some(key) = found else { continue };
+        let list = st.break_sounds[&key].clone();
+        if let Some(clip) = st.pick(&list).cloned() {
+            sfx.play_at(&clip, 0.9, 1.0, mirror_position(sim.world.pose(body).position));
+        }
+    }
+    if sim.world.contacts.is_empty() {
+        return;
     }
     let now = sim.world.steps as f32 * sim.world.settings.fixed_timestep;
     // body -> (actor, part)
