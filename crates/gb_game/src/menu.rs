@@ -1994,7 +1994,7 @@ fn layout(
             Some("MENU_WINS") if t.text.chars().all(|c| c.is_ascii_digit()) => {
                 Some(menu.wins.to_string())
             }
-            Some("MENU_COSTUME_PRESET") => Some(format!("Costume: {}", if menu.editor_costume.is_empty() { "-" } else { menu.editor_costume.as_str() })),
+            Some("MENU_COSTUME_PRESET") => Some(format!("Costume: {}", if menu.editor_costume.is_empty() { "-".to_string() } else { pretty_name(&menu.editor_costume) })),
             Some("MENU_COSTUME_COLOR") => menu
                 .palette
                 .get(menu.player_color)
@@ -2224,5 +2224,30 @@ fn stage_label(name: &str) -> String {
             let mut c = other.chars();
             c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
         }
+    }
+}
+
+/// "BeefCityBull" -> "Beef City Bull", "FIRE FIGHTER" -> "Fire Fighter", "OfficeShort" -> "Office Short".
+fn pretty_name(name: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = name.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        let c = if *c == '_' { ' ' } else { *c };
+        if i > 0 && c.is_ascii_uppercase() && chars[i - 1].is_ascii_lowercase() {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    if out.chars().any(|c| c.is_ascii_lowercase()) {
+        out
+    } else {
+        // ALL CAPS -> Title Case
+        out.split(' ')
+            .map(|w| {
+                let mut cs = w.chars();
+                cs.next().map(|f| f.to_string() + &cs.as_str().to_lowercase()).unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
