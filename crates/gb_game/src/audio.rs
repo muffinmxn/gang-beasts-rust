@@ -50,6 +50,8 @@ pub struct AudioLib {
     pub config: serde_json::Value,
     pub root: std::path::PathBuf,
     families: HashMap<String, Vec<String>>,
+    /// Measured loudness per clip: (rms, peak), linear 0..1 (`audio.py levels`).
+    loudness: HashMap<String, (f32, f32)>,
 }
 
 /// "GB SFX FEET SOFTY5b" -> "GB SFX FEET SOFTY": the numbered variants of one sound.
@@ -66,6 +68,15 @@ pub fn family_key(name: &str) -> String {
 }
 
 impl AudioLib {
+    /// Gain that brings a clip to `target` RMS (clamped; never past full scale), so quiet and loud recordings sit at the
+    /// same level before the mix sliders. 1.0 when the loudness is unknown.
+    pub fn level(&self, clip: &str, target: f32) -> f32 {
+        match self.loudness.get(clip) {
+            Some((rms, peak)) if *rms > 0.0005 => (target / rms).clamp(0.3, 3.0).min(0.98 / peak.max(0.01)),
+            _ => 1.0,
+        }
+    }
+
     /// All clips of a family (see [`family_key`]); empty when unknown.
     pub fn family(&self, key: &str) -> &[String] {
         self.families.get(key).map_or(&[], |v| v.as_slice())
@@ -102,6 +113,10 @@ pub fn plugin(app: &mut App, root: &Path) {
     let d = crate::menu::DEFAULT_VOL;
     let master = std::env::var("GB_VOLUME").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| tenth("vol_master", d.0));
     let (music_gain, sfx_gain) = (tenth("vol_music", d.1), tenth("vol_sfx", d.2));
+    let loudness: HashMap<String, (f32, f32)> = index
+        .iter()
+        .filter_map(|(n, v)| Some((n.clone(), (v["rms"].as_f64()? as f32, v["peak"].as_f64()? as f32))))
+        .collect();
     let mut families: HashMap<String, Vec<String>> = HashMap::new();
     for name in index.keys() {
         families.entry(family_key(name)).or_default().push(name.clone());
@@ -110,7 +125,7 @@ pub fn plugin(app: &mut App, root: &Path) {
         v.sort();
     }
     let files: HashMap<String, String> = files;
-    app.insert_resource(AudioLib { files, config, root: root.to_path_buf(), families })
+    app.insert_resource(AudioLib { files, config, root: root.to_path_buf(), families, loudness })
         .insert_resource(Sfx { master, music_gain, sfx_gain, enabled, ..Default::default() })
         .add_systems(Update, (track_listener, sync_volume, menu_sounds, music, retune_music, drain).chain());
 }
@@ -160,7 +175,7 @@ fn drain(
             continue;
         }
         sfx.last.insert(c.clip.clone(), now);
-        let mut volume = c.volume * sfx.master * sfx.sfx_gain;
+        let mut volume = c.volume * lib.level(&c.clip, 0.07) * sfx.master * sfx.sfx_gain;
         if let Some(p) = c.pos {
             volume /= 1.0 + (p - sfx.listener).length() / 18.0;
         }
@@ -268,6 +283,7 @@ fn music(
     }
     for (clip, volume) in layers {
         if let Some(file) = lib.files.get(&clip) {
+            let volume = volume * lib.level(&clip, 0.10);
             commands.spawn((
                 MusicVoice(volume),
                 AudioPlayer::<AudioSource>(assets.load(format!("audio/{file}"))),

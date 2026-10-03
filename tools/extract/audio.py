@@ -204,6 +204,35 @@ def cmd_stage(stage):
     print(stage, len(out["emitters"]), "emitters,", len(out["clips"]), "clip players")
 
 
+def cmd_levels():
+    """Add loudness (`rms`, `peak`, linear 0..1) to audio-index.json so the engine can level-match clips."""
+    import wave
+    import numpy as np
+    path = os.path.join(E.OUT, "audio-index.json")
+    index = json.load(open(path))
+    for i, (name, meta) in enumerate(index.items()):
+        try:
+            with wave.open(os.path.join(OUT, meta["file"]), "rb") as w:
+                n = w.getnframes()
+                width = w.getsampwidth()
+                raw = w.readframes(min(n, 48000 * 20))  # first 20 s is enough
+            if width == 2:
+                x = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+            elif width == 1:
+                x = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+            else:
+                continue
+            if x.size:
+                meta["rms"] = round(float(np.sqrt(np.mean(x * x))), 5)
+                meta["peak"] = round(float(np.max(np.abs(x))), 4)
+        except Exception as e:
+            print("level", name, type(e).__name__)
+        if i % 300 == 0:
+            print(i, "/", len(index))
+    with open(path, "w") as f:
+        json.dump(index, f, indent=0)
+
+
 STAGES = ["alley", "aquarium", "billboard", "blimp", "buoy", "chute", "containers", "crane", "elevators", "girders",
           "gondola", "grind", "incinerator", "lighthouse", "ring", "rooftop", "subway", "towers", "train", "trawler",
           "trucks", "vents", "wheel"]
@@ -214,6 +243,8 @@ if __name__ == "__main__":
         cmd_clips()
     elif what == "config":
         cmd_config()
+    elif what == "levels":
+        cmd_levels()
     elif what == "stage":
         cmd_stage(sys.argv[2])
     else:
