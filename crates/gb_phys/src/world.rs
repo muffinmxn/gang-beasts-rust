@@ -1001,6 +1001,7 @@ impl World {
         src: &Sidecar,
         index: usize,
         convex: bool,
+        flip: Vec3,
     ) -> Result<*mut PxBase, String> {
         let mesh = &src.collision_meshes[index];
         if mesh.vertices.len() % 3 != 0 || mesh.triangles.len() % 3 != 0 || mesh.vertices.is_empty()
@@ -1018,10 +1019,22 @@ impl World {
             ));
         }
         let insertion = PxPhysics_getPhysicsInsertionCallback_mut(self.physics);
+        // PhysX rejects negative scales on convex meshes, so a mirrored convex is cooked mirrored instead.
+        let mirrored: Vec<f32>;
+        let vertices: &[f32] = if convex && flip != Vec3::ONE {
+            mirrored = mesh
+                .vertices
+                .chunks_exact(3)
+                .flat_map(|v| [v[0] * flip.x, v[1] * flip.y, v[2] * flip.z])
+                .collect();
+            &mirrored
+        } else {
+            &mesh.vertices
+        };
         let points = PxBoundedData {
             stride: 12,
             structgen_pad0: [0; 4],
-            data: mesh.vertices.as_ptr() as *const _,
+            data: vertices.as_ptr() as *const _,
             count: (mesh.vertices.len() / 3) as u32,
             structgen_pad1: [0; 4],
         };
@@ -1197,8 +1210,14 @@ impl World {
                             radius,
                             half_height,
                         } => {
-                            capsule = PxCapsuleGeometry_new_1(*radius, *half_height);
-                            &capsule as *const _ as *const PxGeometry
+                            // A Unity capsule no taller than its diameter is a sphere (PhysX rejects zero half-height).
+                            if *half_height <= 1e-4 {
+                                sphere = PxSphereGeometry_new_1(*radius);
+                                &sphere as *const _ as *const PxGeometry
+                            } else {
+                                capsule = PxCapsuleGeometry_new_1(*radius, *half_height);
+                                &capsule as *const _ as *const PxGeometry
+                            }
                         }
                         Shape::Box { half_extents } => {
                             cube =
@@ -1217,14 +1236,20 @@ impl World {
                                 ));
                                 continue;
                             }
-                            let mesh = match self.cook(src, *index, *convex) {
+                            let flip = Vec3::new(
+                                if scale.x < 0.0 { -1.0 } else { 1.0 },
+                                if scale.y < 0.0 { -1.0 } else { 1.0 },
+                                if scale.z < 0.0 { -1.0 } else { 1.0 },
+                            );
+                            let mesh = match self.cook(src, *index, *convex, flip) {
                                 Ok(m) => m,
                                 Err(e) => {
                                     inst.warnings.push(format!("{}: {e}", node.path));
                                     continue;
                                 }
                             };
-                            let mesh_scale = PxMeshScale_new_2(&px_vec(*scale));
+                            let mesh_scale =
+                                PxMeshScale_new_2(&px_vec(if *convex { scale.abs() } else { *scale }));
                             if *convex {
                                 convex_geo = PxConvexMeshGeometry_new_1(
                                     mesh as *mut PxConvexMesh,
@@ -1257,6 +1282,9 @@ impl World {
                         PxShapeFlags { mBits: flags as u8 },
                     );
                     if shape.is_null() {
+                        if std::env::var_os("GB_PHYS_DEBUG").is_some() {
+                            eprintln!("rejected {} on {}: {:?}", c.kind, node.path, desc.shape);
+                        }
                         inst.warnings
                             .push(format!("{}: PhysX rejected {} geometry", node.path, c.kind));
                         continue;

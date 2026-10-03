@@ -103,7 +103,6 @@ See the "Audio" section in `README.md` for extraction. Status of each part is tr
 
 - [x] Scene settings, collision matrix, joints (Unity basis fix), CCD modes, kinematic movers, joint release.
 - [ ] Unity's 0.04 s maximum timestep clamp is not applied (it would slow debug builds down).
-- [ ] A few stage meshes produce "invalid PxGeometry" warnings (Containers).
 
 ## Known bugs
 
