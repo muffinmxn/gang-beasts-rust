@@ -64,9 +64,8 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 - [ ] Shadowmask / directional lightmaps / light-probe parity, SSAO and shadow softness parity.
 - [ ] Particles, glass and fog cards; Incinerator fire is an emissive stand-in.
 - [~] Alley: the daytime sky dome is skipped (black backdrop) so the gaps around the court are not blue; the missing front wall is still absent.
-- [~] Grind: the follow camera is capped at 32 m so it stays inside the room (the authored 200 m zoom-out showed the
-  unlit black exterior shell and Void boxes). Lightmapped vinyl surfaces use only the lightmap, so the shell outside the
-  baked area is black; `GB_LM_DEBUG=1` prints lightmap stats.
+- [x] Baked lightmaps now actually light vinyl surfaces: updating `lightmap_exposure` on an existing material asset never reached the GPU (exposure 0 = black walls, hence the dark / grey stages and the flaky Grind). The exposure is now written when the vinyl material is created (`vinyl::LightmapExposure`). `GB_LIGHTMAP_STAGE_SCALE` (default 0.25) tunes it; `GB_LM_DEBUG=1` prints lightmap stats.
+- [~] Grind: the follow camera is capped at 32 m so it stays inside the room.
 
 ## Characters and costumes
 
@@ -107,7 +106,7 @@ See the "Audio" section in `README.md` for extraction. Status of each part is tr
 
 ## Known bugs
 
-- Subway is still darker than the retail game after the +1 EV stand-in.
+- Subway: re-check against a retail capture now that lightmaps work (the +1 EV stand-in was removed).
 - Alley black screen-edge patches; Alley exports with missing meshes (the menu-content bundle is required).
 - Bots in Soccer rarely score; the ball is reset after being wedged for 8 s.
 - Debug builds are slow on integrated GPUs; use `cargo run --release` for play.

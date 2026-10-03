@@ -99,7 +99,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 
 ## 10. Known bugs
 
-- Subway is still darker than the retail game; Ring / Incinerator colours are approximations.
+- Ring / Incinerator / Subway colours should be re-checked against retail captures now that the baked lightmaps work.
 - Alley has black patches at the screen edges.
 - Soccer bots wedge the ball into walls; the ball resets after 8 s.
 - Sea LOD tiles show thin dark seams at the horizon.

@@ -45,6 +45,12 @@ impl Default for UrpDirect {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ProbeSource(pub Option<String>);
 
+/// The baked-lightmap exposure written into every vinyl material when it is created. Updating
+/// `lightmap_exposure` on an existing material asset never reached the GPU uniform, so the lightmapped
+/// walls were sampled with exposure 0 (black); the stage's exposure is therefore known up front.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct LightmapExposure(pub f32);
+
 #[derive(Clone, Copy, Debug, ShaderType)]
 pub struct VinylSettings {
     normal_uv: Vec4,
@@ -142,6 +148,7 @@ fn convert(
     mut converted: Local<HashMap<AssetId<StandardMaterial>, Handle<VinylMaterial>>>,
     mut sh_cache: Local<Option<([Vec4; 9], bool)>>,
     probe_source: Res<ProbeSource>,
+    lightmap_exposure: Res<LightmapExposure>,
     urp_direct: Res<UrpDirect>,
     ambient: Res<AmbientLight>,
 ) {
@@ -195,6 +202,7 @@ fn convert(
                 let wall_bump = if wall { 0.6 } else { 1.0 };
                 let f = |key: &str, default: f32| data["floats"][key].as_f64().map_or(default, |v| v as f32);
                 base.base_color = color(&data["colors"]["_BaseColor"], base.base_color);
+                base.lightmap_exposure = lightmap_exposure.0;
                 base.perceptual_roughness =
                     graph_roughness(f("_Smoothness", 0.2) * smoothness_scale);
                 base.metallic = f("_Metallic", 0.0).clamp(0.0, 1.0);

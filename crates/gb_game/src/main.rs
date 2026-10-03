@@ -223,7 +223,7 @@ fn run() -> Result<(), String> {
                 .is_some_and(|node| node.path == "Aquarium/aquarium_enviroment")
         });
     }
-    let lightmap_exposures = graphics["lightmaps"]["encodings"]
+    let lightmap_exposures: Vec<f32> = graphics["lightmaps"]["encodings"]
         .as_array()
         .map(|encodings| {
             encodings
@@ -358,6 +358,16 @@ fn run() -> Result<(), String> {
     .insert_resource(vinyl::ProbeSource(Some(
         graphics_path.to_string_lossy().into_owned(),
     )))
+    .insert_resource(vinyl::LightmapExposure(
+        lightmap_exposures.first().copied().unwrap_or(0.0)
+            * if stage_name == "menu" || stage_name == "aquarium" {
+                1.0
+            } else {
+                std::env::var("GB_LIGHTMAP_STAGE_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.25)
+            }
+            * UNITY_TO_BEVY_LUMINANCE
+            * lightmap_exposure_scale(),
+    ))
     .add_systems(Update, light_probes::apply_to_beast)
     // Unity ambient sky color/intensity from RenderSettings, scaled to Bevy's lumen units.
     .insert_resource({
@@ -1374,27 +1384,10 @@ fn post_stack(
     // Incinerator's fog/sky are saturated orange-red and the whole room read as a red wash; pull
     // the colour back a little and lift it (per-stage stand-in until its lightmaps are ported).
     let (sat_adj, ev_adj) = if stage_name == "ring" {
-        (std::env::var("GB_RING_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0), std::env::var("GB_RING_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(-1.0))
+        (std::env::var("GB_RING_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0), std::env::var("GB_RING_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(-0.5))
     } else if stage_name == "subway" {
         // Subway reads far too dark against the retail platform; lift exposure (stand-in until its lightmaps match).
-        (0.0, std::env::var("GB_SUBWAY_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(1.0))
-    } else if stage_name == "girders" {
-        // The unfinished tower read as dull grey concrete in a pale haze: lift it and bring the warmth back.
-        (
-            std::env::var("GB_GIRDERS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(22.0),
-            std::env::var("GB_GIRDERS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.6),
-        )
-    } else if stage_name == "towers" {
-        (
-            std::env::var("GB_TOWERS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(18.0),
-            std::env::var("GB_TOWERS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.35),
-        )
-    } else if stage_name == "vents" {
-        // The fan chamber is a bright cream room in the retail game; the baked light barely reaches it here.
-        (
-            std::env::var("GB_VENTS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(8.0),
-            std::env::var("GB_VENTS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(1.4),
-        )
+        (0.0, std::env::var("GB_SUBWAY_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0))
     } else if stage_name == "incinerator" {
         (
             std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0),
