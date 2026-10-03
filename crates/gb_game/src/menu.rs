@@ -22,6 +22,8 @@ const CREDITS: &str = "credits";
 const FOV_DEGREES: f32 = 40.0;
 const COSTUME_COLOR_ITEM: usize = usize::MAX;
 const COSTUME_PRESET_ITEM: usize = usize::MAX - 2;
+/// Editor slot rows: `COSTUME_SLOT_ITEM - slot_index` (slots 0..6).
+const COSTUME_SLOT_ITEM: usize = usize::MAX - 20;
 /// Button.m_Colors of the main menu buttons (normal yellow, selected pink).
 const NORMAL: Color = Color::srgb(1.0, 0.752, 0.0);
 const SELECTED: Color = Color::srgb(0.778, 0.442, 0.534);
@@ -72,6 +74,9 @@ pub struct Menu {
     editor_actor: Option<usize>,
     /// Costume editor row label: the costume the display beast wears.
     editor_costume: String,
+    /// Costume editor: the item picked in each slot (Head, Eyewear, Face, Body, Back, Legs) and the preset they were read from.
+    editor_picks: [Option<u16>; 6],
+    editor_synced: String,
     screens: HashMap<&'static str, Screen>,
     current: &'static str,
     selected: Option<usize>,
@@ -595,33 +600,28 @@ fn setup(
             hint("BACK", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.46), 40.0);
         }
         if key == COSTUME_EDITOR {
-            items.push(COSTUME_PRESET_ITEM);
-            item_keys.insert(COSTUME_PRESET_ITEM, "MENU_COSTUME_PRESET".to_string());
-            texts.push(MenuText {
-                world: None,
-                ui_position: Vec2::new(-canvas_size.x * 0.28, -canvas_size.y * 0.30),
-                text: "Costume".to_string(),
-                size: 42.0,
-                align: JustifyText::Center,
-                width: canvas_size.x * 0.45,
-                item: Some(COSTUME_PRESET_ITEM),
-                color: palette.first().map_or(Color::WHITE, |(_, color)| *color),
-                loading: false,
-            });
-            items.push(COSTUME_COLOR_ITEM);
-            item_keys.insert(COSTUME_COLOR_ITEM, "MENU_COSTUME_COLOR".to_string());
-            let color = palette.first().map_or(Color::WHITE, |(_, color)| *color);
-            texts.push(MenuText {
-                world: None,
-                ui_position: Vec2::new(-canvas_size.x * 0.28, -canvas_size.y * 0.38),
-                text: "Color".to_string(),
-                size: 42.0,
-                align: JustifyText::Center,
-                width: canvas_size.x * 0.45,
-                item: Some(COSTUME_COLOR_ITEM),
-                color,
-                loading: false,
-            });
+            // Rows, top to bottom: preset, six slots, colour.
+            let base_color = palette.first().map_or(Color::WHITE, |(_, color)| *color);
+            let mut row = |id: usize, label: &str, index: usize, items: &mut Vec<usize>, item_keys: &mut HashMap<usize, String>, key_name: String| {
+                items.push(id);
+                item_keys.insert(id, key_name);
+                texts.push(MenuText {
+                    world: None,
+                    ui_position: Vec2::new(-canvas_size.x * 0.31, canvas_size.y * (0.33 - 0.073 * index as f32)),
+                    text: label.to_string(),
+                    size: 34.0,
+                    align: JustifyText::Center,
+                    width: canvas_size.x * 0.45,
+                    item: Some(id),
+                    color: base_color,
+                    loading: false,
+                });
+            };
+            row(COSTUME_PRESET_ITEM, "Costume", 0, &mut items, &mut item_keys, "MENU_COSTUME_PRESET".to_string());
+            for (i, name) in crate::costume::SLOT_NAMES.iter().enumerate() {
+                row(COSTUME_SLOT_ITEM - i, name, i + 1, &mut items, &mut item_keys, format!("MENU_COSTUME_SLOT_{i}"));
+            }
+            row(COSTUME_COLOR_ITEM, "Color", 7, &mut items, &mut item_keys, "MENU_COSTUME_COLOR".to_string());
         }
         // The source CinemachineTransposer uses LockToTargetWithWorldUp and a one-second
         // position damping value. The Composer centers its LookAt target, which is the
@@ -632,12 +632,9 @@ fn setup(
         .looking_at(target_transform.translation, Vec3::Y);
         let mut nav = HashMap::new();
         for &it in &items {
-            if it == COSTUME_COLOR_ITEM {
-                nav.insert(it, (Some(COSTUME_PRESET_ITEM), None));
-                continue;
-            }
-            if it == COSTUME_PRESET_ITEM {
-                nav.insert(it, (None, Some(COSTUME_COLOR_ITEM)));
+            if it == COSTUME_COLOR_ITEM || it == COSTUME_PRESET_ITEM || (COSTUME_SLOT_ITEM - 5..=COSTUME_SLOT_ITEM).contains(&it) {
+                // Up / down follow the row order.
+                nav.insert(it, (None, None));
                 continue;
             }
             let n = script(it, "Button")
@@ -661,7 +658,7 @@ fn setup(
             nav.insert(it, (link("m_SelectOnUp"), link("m_SelectOnDown")));
         }
         let default = if key == COSTUME_EDITOR {
-            Some(COSTUME_COLOR_ITEM)
+            Some(COSTUME_PRESET_ITEM)
         } else {
             data["defaultSelection"]["node"]
                 .as_u64()
@@ -797,8 +794,9 @@ fn setup(
         ("BACK_MAIN", "Back")], &mut item_keys));
     // Only the unlocked palette is implemented so far; don't expose inert outfit controls.
     if let Some(s) = screens.get_mut(COSTUME_EDITOR) {
-        s.items.retain(|id| *id == COSTUME_COLOR_ITEM || *id == COSTUME_PRESET_ITEM);
-        s.texts.retain(|t| t.item == Some(COSTUME_COLOR_ITEM) || t.item == Some(COSTUME_PRESET_ITEM));
+        let editor_row = |id: usize| id == COSTUME_COLOR_ITEM || id == COSTUME_PRESET_ITEM || (COSTUME_SLOT_ITEM - 5..=COSTUME_SLOT_ITEM).contains(&id);
+        s.items.retain(|id| editor_row(*id));
+        s.texts.retain(|t| t.item.is_some_and(editor_row));
         let back_id = usize::MAX - 1 - item_keys.len();
         item_keys.insert(back_id, "BACK_MAIN".into());
         s.items.push(back_id);
@@ -824,6 +822,8 @@ fn setup(
         editor_spawn,
         editor_actor: None,
         editor_costume: String::new(),
+        editor_picks: [None; 6],
+        editor_synced: String::new(),
         screens,
         current: start,
         selected,
@@ -1142,6 +1142,25 @@ fn cycle_for_capture(
     mut costumes: Option<ResMut<crate::costume::Costumes>>,
     mut frames: Local<u32>,
 ) {
+    // Debug: GB_EDITOR_TEST=1 builds an outfit from the 6th item of every slot once the editor beast exists.
+    if std::env::var_os("GB_EDITOR_TEST").is_some() {
+        *frames += 1;
+        if *frames == 400 {
+            if let (Some(menu), Some(costumes)) = (menu.as_mut(), costumes.as_mut()) {
+                if let Some(actor) = menu.editor_actor {
+                    for slot in 0..6 {
+                        let choices = costumes.slot_items(slot as u32 + 1);
+                        menu.editor_picks[slot] = choices.get(5).copied();
+                    }
+                    let picks = menu.editor_picks;
+                    costumes.apply_custom(actor, &picks);
+                    menu.editor_synced = "Custom".into();
+                    menu.dirty = true;
+                    info!("editor test: custom outfit {:?}", picks);
+                }
+            }
+        }
+    }
     let (colour_every, costume_every) = (
         std::env::var("GB_CYCLE_COLOUR").ok().and_then(|v| v.parse::<u32>().ok()),
         std::env::var("GB_CYCLE_COSTUME").ok().and_then(|v| v.parse::<u32>().ok()),
@@ -1321,6 +1340,21 @@ fn input(
         let name = costumes.worn_for(actor).unwrap_or_default();
         if name != menu.editor_costume {
             menu.editor_costume = name;
+            menu.dirty = true;
+        }
+        // Read the per-slot picks from the preset the beast is wearing (unless it is the player's own Custom outfit,
+        // whose picks the editor itself maintains).
+        if menu.editor_synced != menu.editor_costume {
+            menu.editor_synced = menu.editor_costume.clone();
+            let mut picks = [None; 6];
+            for (uid, _) in costumes.preset_items(&menu.editor_costume) {
+                if let Some(slot) = costumes.item_slot(uid) {
+                    if (1..=6).contains(&slot) {
+                        picks[slot as usize - 1] = Some(uid);
+                    }
+                }
+            }
+            menu.editor_picks = picks;
             menu.dirty = true;
         }
     }
@@ -1527,6 +1561,22 @@ fn input(
             menu.wins - 1
         };
         menu.dirty = true;
+    }
+    if (left || right) && key.starts_with("MENU_COSTUME_SLOT_") {
+        if let (Some(actor), Some(costumes)) = (menu.editor_actor, costumes.as_mut()) {
+            let slot: usize = key["MENU_COSTUME_SLOT_".len()..].parse().unwrap_or(0).min(5);
+            let choices = costumes.slot_items(slot as u32 + 1);
+            // None, then every item of the slot.
+            let at = menu.editor_picks[slot].and_then(|u| choices.iter().position(|c| *c == u)).map_or(0, |p| p + 1);
+            let n = choices.len() + 1;
+            let next = if right { (at + 1) % n } else { (at + n - 1) % n };
+            menu.editor_picks[slot] = if next == 0 { None } else { Some(choices[next - 1]) };
+            let picks = menu.editor_picks;
+            let items = costumes.apply_custom(actor, &picks);
+            save_custom_costume(&items);
+            menu.editor_synced = "Custom".into();
+            menu.dirty = true;
+        }
     }
     if (left || right) && key == "MENU_COSTUME_PRESET" {
         if let (Some(actor), Some(costumes)) = (menu.editor_actor, costumes.as_mut()) {
@@ -1820,6 +1870,7 @@ fn layout(
     windows: Query<&Window>,
     icons: Query<Entity, With<PromptIcon>>,
     images: Res<Assets<Image>>,
+    costume_data: Option<Res<crate::costume::Costumes>>,
     mut cams: Query<(&mut Transform, &mut Projection, &Camera, &GlobalTransform), With<Camera3d>>,
     mut labels: Query<(
         Entity,
@@ -1990,9 +2041,21 @@ fn layout(
         font.font_size = size_px.max(1.0);
         // Dynamic option values.
         let row = t.item.and_then(|id| menu.item_keys.get(&id)).map(String::as_str);
+        let costumes_labels = costume_data.as_deref();
         let value = match row {
             Some("MENU_WINS") if t.text.chars().all(|c| c.is_ascii_digit()) => {
                 Some(menu.wins.to_string())
+            }
+            Some(k) if k.starts_with("MENU_COSTUME_SLOT_") => {
+                let slot: usize = k["MENU_COSTUME_SLOT_".len()..].parse().unwrap_or(0).min(5);
+                let value = match (menu.editor_picks[slot], costumes_labels) {
+                    (Some(uid), Some(c)) => {
+                        let l = c.item_label(uid);
+                        if l.chars().count() > 20 { format!("{}..", l.chars().take(18).collect::<String>().trim_end()) } else { l }
+                    }
+                    _ => "None".to_string(),
+                };
+                Some(format!("{}: {}", crate::costume::SLOT_NAMES[slot], value))
             }
             Some("MENU_COSTUME_PRESET") => Some(format!("Costume: {}", if menu.editor_costume.is_empty() { "-".to_string() } else { pretty_name(&menu.editor_costume) })),
             Some("MENU_COSTUME_COLOR") => menu
@@ -2142,6 +2205,16 @@ pub fn save_audio_tenths(master: u32, music: u32, sfx: u32) {
     write_prefs(&value);
 }
 
+/// The player's own outfit from the costume editor, as (item uid, colour id) pairs.
+fn save_custom_costume(items: &[(u16, u32)]) {
+    let mut value = load_prefs();
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["custom_costume"] = items.iter().map(|(u, c)| serde_json::json!([u, c])).collect::<Vec<_>>().into();
+    write_prefs(&value);
+}
+
 fn save_prefs_audio(menu: &Menu) {
     let mut value = load_prefs();
     if !value.is_object() {
@@ -2228,7 +2301,7 @@ fn stage_label(name: &str) -> String {
 }
 
 /// "BeefCityBull" -> "Beef City Bull", "FIRE FIGHTER" -> "Fire Fighter", "OfficeShort" -> "Office Short".
-fn pretty_name(name: &str) -> String {
+pub fn pretty_name(name: &str) -> String {
     let mut out = String::new();
     let chars: Vec<char> = name.chars().collect();
     for (i, c) in chars.iter().enumerate() {
@@ -2239,7 +2312,14 @@ fn pretty_name(name: &str) -> String {
         out.push(c);
     }
     if out.chars().any(|c| c.is_ascii_lowercase()) {
-        out
+        // Capitalise each word's first letter.
+        out.split(' ')
+            .map(|w| {
+                let mut cs = w.chars();
+                cs.next().map(|f| f.to_uppercase().collect::<String>() + cs.as_str()).unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
         // ALL CAPS -> Title Case
         out.split(' ')

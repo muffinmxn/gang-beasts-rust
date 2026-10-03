@@ -30,8 +30,13 @@ pub struct Preset {
 
 #[derive(Deserialize)]
 struct Item {
-    #[allow(dead_code)]
     slot: u32,
+    /// Slots this item hides (a full-body kigurumi hides the hat and the legs).
+    #[serde(default)]
+    disable: Vec<u32>,
+    /// Prefab file name, e.g. `Construction_hardHat.prefab`.
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Resource)]
@@ -54,7 +59,64 @@ pub struct Costumes {
 #[derive(Resource)]
 pub struct CostumeRoot(pub std::path::PathBuf);
 
+/// Editor slots (`CostumeSlot`): 1 head (hats, hair), 2 eyewear, 3 face (beards, masks), 4 body, 5 back / accessories, 6 legs.
+pub const SLOT_NAMES: [&str; 6] = ["Head", "Eyewear", "Face", "Body", "Back", "Legs"];
+
 impl Costumes {
+    /// All item uids that can go in `slot` (1..=6), sorted.
+    pub fn slot_items(&self, slot: u32) -> Vec<u16> {
+        let mut v: Vec<u16> = self.items.iter().filter(|(_, i)| i.slot == slot).map(|(k, _)| *k).collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// Readable name of an item from its prefab file name.
+    pub fn item_label(&self, uid: u16) -> String {
+        let raw = self.items.get(&uid).map_or("", |i| i.name.as_str());
+        let base = raw.strip_suffix(".prefab").unwrap_or(raw);
+        let base = base.strip_prefix("costume_").or_else(|| base.strip_prefix("Costume_")).unwrap_or(base);
+        crate::menu::pretty_name(base)
+    }
+
+    /// Slot an item belongs to.
+    pub fn item_slot(&self, uid: u16) -> Option<u32> {
+        self.items.get(&uid).map(|i| i.slot)
+    }
+
+    /// Items of a named preset.
+    pub fn preset_items(&self, name: &str) -> Vec<(u16, u32)> {
+        self.presets.iter().find(|p| p.name.eq_ignore_ascii_case(name)).map(|p| p.items.clone()).unwrap_or_default()
+    }
+
+    /// Build the outfit from per-slot picks (`picks[slot-1]`), honouring the slots an item hides, and dress the actor in it.
+    pub fn apply_custom(&mut self, actor: usize, picks: &[Option<u16>; 6]) -> Vec<(u16, u32)> {
+        let mut hidden = [false; 7];
+        for uid in picks.iter().flatten() {
+            if let Some(item) = self.items.get(uid) {
+                for d in &item.disable {
+                    if (*d as usize) < 7 {
+                        hidden[*d as usize] = true;
+                    }
+                }
+            }
+        }
+        let items: Vec<(u16, u32)> = picks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.filter(|_| !hidden[i + 1]).map(|uid| (uid, 0)))
+            .collect();
+        match self.presets.iter_mut().find(|p| p.name == "Custom") {
+            Some(p) => p.items = items.clone(),
+            None => self.presets.push(Preset { name: "Custom".into(), unlocked: true, items: items.clone() }),
+        }
+        self.actor_choices.insert(actor, "Custom".into());
+        if actor == 0 {
+            self.choice = Some("Custom".into());
+        }
+        self.redress = true;
+        items
+    }
+
     /// Cycle the chosen preset (lobby left/right). Returns false when there is nothing to cycle.
     /// Clears `applied` and flags `redress` so `dress` re-runs with the new preset.
     pub fn cycle_preset(&mut self, delta: isize) -> bool {
@@ -252,8 +314,19 @@ pub fn plugin(app: &mut App, root: &std::path::Path) {
         .filter_map(|(k, v)| k.parse().ok().map(|k| (k, v)))
         .collect();
     info!("{} costume presets", index.presets.len());
+    let mut presets = index.presets;
+    // The player's own outfit from the costume editor (saved in the lobby prefs file).
+    if let Some(list) = crate::menu::load_prefs()["custom_costume"].as_array() {
+        let items: Vec<(u16, u32)> = list
+            .iter()
+            .filter_map(|e| Some((e[0].as_u64()? as u16, e[1].as_u64().unwrap_or(0) as u32)))
+            .collect();
+        if !items.is_empty() {
+            presets.push(Preset { name: "Custom".into(), unlocked: true, items });
+        }
+    }
     app.insert_resource(Costumes {
-        presets: index.presets,
+        presets,
         items,
         applied: HashMap::new(),
         choice: None,

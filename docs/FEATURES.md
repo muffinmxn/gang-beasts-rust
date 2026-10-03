@@ -68,8 +68,9 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 
 - Presets from the game's costume database, tinted with the game's palette shades; the player's costume is carried from the
   lobby into the match; enemies in Waves wear the wave costumes.
-- Costume editor: a real display beast, `Costume` and `Color` rows. The per-part editor (head, face, chest, hips, voice)
-  is missing.
+- Costume editor: a real display beast with rows for the preset, the six item slots (Head, Eyewear, Face, Body, Back,
+  Legs; items hide the slots they `disable`), and colour. The outfit is saved as the `Custom` preset in the lobby prefs
+  file and used in matches. Missing: per-item colours, voices, face expressions, unlock rules.
 
 ## 7. Menus and UI
 
