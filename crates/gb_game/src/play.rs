@@ -486,7 +486,9 @@ pub fn build(
     // Read the active source composer screen position and camera marker settings.
     for n in &sim.scenes[0].1.nodes {
         for c in &n.components {
-            if c.script.as_deref() == Some("GlobalCameraMarker") && n.active_in_hierarchy {
+            // Lighthouse has a second marker (7-20 m range, parked under the sea); the first is the stage camera.
+            let first_only = std::env::var_os("GB_CAM_LAST_MARKER").is_none() && !sim.cam_offsets.is_empty();
+            if c.script.as_deref() == Some("GlobalCameraMarker") && n.active_in_hierarchy && !first_only {
                 // CameraMarker is serialized at (0, 8, 14) for Aquarium; use the source anchor
                 // instead of deriving camera height and distance from the viewer start pose.
                 sim.cam_anchor_offset = Vec3::from_array(n.transform.translation);
@@ -1890,6 +1892,7 @@ fn map_nodes(
                     let lower = n.0.to_ascii_lowercase();
                     let hide = n.0 == "default"
                         || lower.contains("void")
+                        || lower.contains("volumelight")
                         || lower.contains("fog card")
                         || lower.contains("fogcard")
                         || Some(&n.0) == hide_debug.as_ref();
@@ -2735,6 +2738,8 @@ fn camera_offset(
         let elev = orbit_offset.y.atan2(flat);
         height = height.max(distance * elev.sin()).min(distance - 0.5);
     }
+    // Never steeper than ~48 degrees: stages whose marker sits high above the target (Containers) looked straight down.
+    let height = height.min(distance * 0.74);
     let horizontal = (distance * distance - height * height).sqrt();
     let orbit = Vec3::new(orbit_offset.x, 0.0, orbit_offset.z).normalize_or_zero();
     orbit * horizontal + Vec3::Y * height

@@ -370,6 +370,16 @@ fn run() -> Result<(), String> {
             look::Look::menu().ambient(ambient)
         } else if stage_name == "rooftop" {
             look::Look::rooftop().ambient(ambient)
+        } else if stage_name == "ring" {
+            // The Ring's authored sky ambient is a strong teal that read as a blue wash; keep its level, drop most of the tint
+            // (GB_RING_TINT = how much of the teal stays, default 0.2).
+            let mut a = look::Look::load().ambient(ambient);
+            let keep: f32 = std::env::var("GB_RING_TINT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.2);
+            let c = a.color.to_linear();
+            let grey = c.red * 0.2126 + c.green * 0.7152 + c.blue * 0.0722;
+            let mix = |v: f32| grey + (v - grey) * keep;
+            a.color = Color::linear_rgb(mix(c.red) * 1.15, mix(c.green), mix(c.blue) * 0.9);
+            a
         } else {
             look::Look::load().ambient(ambient)
         }
@@ -1368,6 +1378,12 @@ fn post_stack(
     } else if stage_name == "subway" {
         // Subway reads far too dark against the retail platform; lift exposure (stand-in until its lightmaps match).
         (0.0, std::env::var("GB_SUBWAY_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(1.0))
+    } else if stage_name == "girders" {
+        // The unfinished tower read as dull grey concrete in a pale haze: lift it and bring the warmth back.
+        (
+            std::env::var("GB_GIRDERS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(22.0),
+            std::env::var("GB_GIRDERS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.6),
+        )
     } else if stage_name == "incinerator" {
         (
             std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0),

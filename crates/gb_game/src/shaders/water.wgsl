@@ -117,7 +117,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool, @builtin(sa
     pbr_input.N = normalize(pbr_input.N + vec3<f32>(-nm.x, 0.0, nm.y));
     // Crest foam from the wave height.
     let h = gerstner(xz, t * water.misc.y).y * water.misc.x;
-    let foam = smoothstep(0.55, 0.95, h / max(dot(water.amp, vec4<f32>(1.0)) * water.misc.x, 0.001)) * water.misc.w;
+    let foam = smoothstep(0.55, 0.95, h / max(dot(water.amp, vec4<f32>(1.0)) * water.misc.x, 0.001)) * water.misc.w * 0.3;
     var shore = 0.0;
 #ifdef DEPTH_PREPASS
     // Shoreline / contact foam where opaque geometry (hulls, ice, buoys) meets the surface (Water4 depth fade).

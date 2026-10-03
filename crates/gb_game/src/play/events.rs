@@ -489,6 +489,8 @@ struct Lift {
     index: usize,
     going_up: bool,
     wait: f32,
+    /// The car's rope segments (`Elevators_Cable` rigidbodies): held still while the car works, freed when it snaps.
+    cables: Vec<usize>,
 }
 
 /// The Train stage's endless track (`TrackPool` 12 m/s, `TrackMover`, pieces `trackSectionOffset` 100 m long): the
@@ -860,6 +862,9 @@ pub fn stage_events(
             sim.world.set_kinematic(body, false);
             sim.world.set_use_gravity(body, true);
             let n = sim.world.release_joints_of(body);
+            for c in state.lifts[car].cables.clone() {
+                sim.world.set_kinematic(c, false);
+            }
             info!("elevator car released {n} joint(s)");
             let snap_at = sim.world.pose(body).position;
             sim.sound_queue.push(("GB SFX METAL CABLE SNAP".into(), 1.0, Some(snap_at)));
@@ -1811,7 +1816,30 @@ fn init(
             let floors: Vec<f32> = d["floors"].as_array().into_iter().flatten().filter_map(|v| v.as_f64()).map(|v| v as f32).collect();
             sim.world.set_kinematic(body, true);
             let pose = sim.world.pose(body);
-            state.lifts.push(Lift { body, pose, start_y: pose.position.y, floors, index: 1, going_up: true, wait: 3.0 });
+            // The rope segments under this car's `Cables` groups hang straight; as free dynamic chains they sagged
+            // and bent when the car moved, so they stay put until the cable snaps.
+            let mut cables = Vec::new();
+            for (j, cn) in nodes.iter().enumerate() {
+                if script_of(cn, "Elevators_Cable").is_none() {
+                    continue;
+                }
+                let mut cur = cn.parent;
+                let mut under = false;
+                while let Some(c) = cur {
+                    if Some(c) == d["m_GameObject"]["node"].as_u64().map(|v| v as usize) {
+                        under = true;
+                        break;
+                    }
+                    cur = nodes[c].parent;
+                }
+                if under {
+                    if let Some(&b) = sim.world.instances[inst].bodies.get(&j) {
+                        sim.world.set_kinematic(b, true);
+                        cables.push(b);
+                    }
+                }
+            }
+            state.lifts.push(Lift { body, pose, start_y: pose.position.y, floors, index: 1, going_up: true, wait: 3.0, cables });
         }
     }
     if !state.lifts.is_empty() {
