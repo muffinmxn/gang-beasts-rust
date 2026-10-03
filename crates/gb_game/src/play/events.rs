@@ -458,18 +458,35 @@ struct Lift {
 }
 
 /// The Train stage's endless track (`TrackPool` 12 m/s, `TrackMover`, pieces `trackSectionOffset` 100 m long): the
-/// train stays at the origin while the straight pieces scroll underneath and recycle at the front. Simplified: only
-/// the straight pool is used (the turn pieces and boulder landslides are not ported).
+/// train stays at the origin while pieces scroll underneath and recycle at the front. Each new piece is a straight, left
+/// or right section drawn from the three pools (left / right sections jog the track 20 m sideways). The game steers the
+/// train along the `TrackNode` chain with `NodeFollower` forces; here the train stays put and the whole track is shifted
+/// sideways so the rails under it stay centred. Boulder landslides are separate.
 struct Track {
     pieces: Vec<TrackPiece>,
+    active: Vec<ActivePiece>,
     speed: f32,
     length: f32,
+    /// World z of the point under the train.
+    ref_z: f32,
 }
 
 struct TrackPiece {
     entity: Entity,
     bodies: Vec<(usize, Iso)>,
-    z: f32,
+    /// 0 straight, 1 left, 2 right.
+    kind: u8,
+    /// TrackNode chain (local x, z), sorted by z.
+    poly: Vec<(f32, f32)>,
+    /// Lateral jog from the piece start to the next piece's start.
+    dx: f32,
+}
+
+struct ActivePiece {
+    idx: usize,
+    /// Start offset of the piece (lateral, along the track).
+    sx: f32,
+    sz: f32,
 }
 
 /// Pooled physics props (`CoreNet.Pooling.PoolSpawner` + `Pool`/`SyncPool`, 0x488FD0): Chute's meat paste, Incinerator's
@@ -549,6 +566,7 @@ struct Truck {
 #[derive(Default)]
 pub struct StageEvents {
     in_water: HashSet<usize>,
+    track_shift: f32,
     last_splash: f32,
     debug_road_bucket: u64,
     key: (usize, usize, u32),
@@ -696,6 +714,7 @@ pub fn stage_events(
     // Landslide boulders.
     if state.boulders.is_some() {
         let rr = [state.rand01(), state.rand01(), state.rand01()];
+        let shift = state.track_shift;
         let b = state.boulders.as_mut().unwrap();
         for item in &mut b.items {
             if item.live {
@@ -706,7 +725,7 @@ pub fn stage_events(
             if let Some(ii) = b.items.iter().position(|i| !i.live) {
                 let sp = b.spawns[(rr[0] * b.spawns.len() as f32) as usize % b.spawns.len()];
                 if let Ok(g) = globals.get(sp) {
-                    let pos = mirror_position(g.translation()) + Vec3::new((rr[1] - 0.5) * 6.0, 0.0, (rr[2] - 0.5) * 6.0);
+                    let pos = mirror_position(g.translation()) + Vec3::new((rr[1] - 0.5) * 6.0 + shift, 0.0, (rr[2] - 0.5) * 6.0);
                     let item = &mut b.items[ii];
                     for (body, rest) in &item.bodies {
                         sim.world.restore_body(*body);
@@ -893,16 +912,75 @@ pub fn stage_events(
         sim.world.move_kinematic(l.body, l.pose);
     }
     // Scrolling track pieces.
-    if let Some(track) = &mut state.track {
-        let total = track.length * track.pieces.len() as f32;
-        let back = -track.length * 2.5;
-        for piece in &mut track.pieces {
-            piece.z -= track.speed * dt;
-            if piece.z < back {
-                piece.z += total;
+    if state.track.is_some() {
+        let (r1, r2) = (state.rand01(), state.rand01());
+        let track = state.track.as_mut().unwrap();
+        for ap in &mut track.active {
+            ap.sz -= track.speed * dt;
+        }
+        // Recycle the piece that has scrolled out of sight at the back.
+        if track.active.first().is_some_and(|f| f.sz + track.length < -track.length * 2.5) {
+            let gone = track.active.remove(0);
+            for (body, _) in &track.pieces[gone.idx].bodies {
+                sim.world.move_kinematic(*body, Iso::new(Vec3::new(0.0, -3000.0, 0.0), Quat::IDENTITY));
             }
-            for (body, rest) in &piece.bodies {
-                let p = Iso::new(rest.position + Vec3::new(0.0, 0.0, piece.z), rest.rotation);
+            if let Ok(mut v) = visibility.get_mut(track.pieces[gone.idx].entity) {
+                *v = Visibility::Hidden;
+            }
+            let last = track.active.last().map(|l| (l.idx, l.sx, l.sz)).unwrap_or((0, 0.0, 0.0));
+            let (sx, sz) = (last.1 + track.pieces[last.0].dx, last.2 + track.length);
+            // Wander left / right but come back when the track drifts more than `maxWonderArea` from the centre.
+            let mut kind = if r1 < 0.34 { 0 } else if r1 < 0.67 { 1 } else { 2 };
+            if sx > 45.0 {
+                kind = 2;
+            } else if sx < -45.0 {
+                kind = 1;
+            }
+            let free: Vec<usize> = (0..track.pieces.len())
+                .filter(|i| track.pieces[*i].kind == kind && !track.active.iter().any(|a| a.idx == *i))
+                .collect();
+            let idx = free.get((r2 * free.len() as f32) as usize % free.len().max(1)).copied().unwrap_or(gone.idx);
+            track.active.push(ActivePiece { idx, sx, sz });
+            for (body, _) in &track.pieces[idx].bodies {
+                sim.world.restore_body(*body);
+            }
+            if let Ok(mut v) = visibility.get_mut(track.pieces[idx].entity) {
+                *v = Visibility::Visible;
+            }
+        }
+        // Centre line under the train.
+        let mut centre = 0.0;
+        for ap in &track.active {
+            let lz = track.ref_z - ap.sz;
+            if lz >= 0.0 && lz < track.length {
+                let poly = &track.pieces[ap.idx].poly;
+                centre = ap.sx
+                    + match poly.iter().position(|(_, z)| *z >= lz) {
+                        Some(0) | None => poly.first().map_or(0.0, |p| p.0),
+                        Some(k) => {
+                            let (a, b) = (poly[k - 1], poly[k]);
+                            a.0 + (b.0 - a.0) * ((lz - a.1) / (b.1 - a.1).max(1e-3)).clamp(0.0, 1.0)
+                        }
+                    };
+                break;
+            }
+        }
+        let shift = -centre;
+        if std::env::var_os("GB_TRACK_DEBUG").is_some() && sim.world.steps % 240 == 0 {
+            let kinds: Vec<u8> = track.active.iter().map(|a| track.pieces[a.idx].kind).collect();
+            info!("track: shift {shift:.1} centre {centre:.1} pieces {kinds:?}");
+            for (k, ac) in sim.actors.iter().enumerate() {
+                let p = sim.world.pose(ac.beast.body(Part::Hips)).position;
+                info!("  actor {k} state {} hips {:.1} {:.1} {:.1}", ac.state, p.x, p.y, p.z);
+            }
+        }
+        state.track_shift = shift;
+        let track = state.track.as_ref().unwrap();
+        for ap in &track.active {
+            for (body, rest) in &track.pieces[ap.idx].bodies {
+                // Pool parking runs after this module's setup, so make sure active pieces are in the simulation.
+                sim.world.restore_body(*body);
+                let p = Iso::new(rest.position + Vec3::new(ap.sx + shift, 0.0, ap.sz), rest.rotation);
                 sim.world.move_kinematic(*body, p);
             }
         }
@@ -1681,10 +1759,11 @@ fn init(
         let poses_t = sim.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY);
         if let Some(tp) = nodes.iter().find_map(|n| script_of(n, "TrackPool")) {
             let speed = tp["trackMovementSpeed"].as_f64().unwrap_or(12.0) as f32;
-            let pool_node = tp["trackPoolStright"]["node"].as_u64().map(|n| n as usize);
-            let mut pieces = Vec::new();
-            if let Some(pool) = pool_node.and_then(|p| script_of(&nodes[p], "Pool")) {
-                for (k, p) in pool["_Pool"].as_array().into_iter().flatten().enumerate() {
+            let mut pieces: Vec<TrackPiece> = Vec::new();
+            for (kind, key) in [(0u8, "trackPoolStright"), (1u8, "trackPoolLeft"), (2u8, "trackPoolRight")] {
+                let pool_node = tp[key]["node"].as_u64().map(|n| n as usize);
+                let Some(pool) = pool_node.and_then(|p| script_of(&nodes[p], "Pool")) else { continue };
+                for p in pool["_Pool"].as_array().into_iter().flatten() {
                     let Some(n) = p["node"].as_u64().map(|n| n as usize) else { continue };
                     let mut bodies = Vec::new();
                     for (j, _) in nodes.iter().enumerate() {
@@ -1704,20 +1783,56 @@ fn init(
                             }
                         }
                     }
+                    // The piece's TrackNode chain gives its centre line.
+                    let mut poly: Vec<(f32, f32)> = script_of(&nodes[n], "TrackMover")
+                        .map(|m| {
+                            m["_connections"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|c| c["node"].as_u64())
+                                .filter_map(|k| poses_t.get(k as usize))
+                                .map(|p| (p.position.x, p.position.z))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    poly.sort_by(|a, b| a.1.total_cmp(&b.1));
+                    let dx = match poly.as_slice() {
+                        [.., a, b] if (b.1 - a.1).abs() > 1e-3 => b.0 + (b.0 - a.0) / (b.1 - a.1) * (100.0 - b.1),
+                        _ => 0.0,
+                    };
                     if let (false, Some(&e)) = (bodies.is_empty(), map.0.get(&(0, n))) {
-                        pieces.push(TrackPiece { entity: e, bodies, z: (k as f32 - 2.0) * 100.0 });
+                        pieces.push(TrackPiece { entity: e, bodies, kind, poly, dx });
                     }
                 }
             }
-            let _ = &poses_t;
-            if !pieces.is_empty() {
-                for piece in &pieces {
-                    if let Ok(mut v) = visibility.get_mut(piece.entity) {
-                        *v = Visibility::Visible;
+            // Start with five straight sections (the train's starting stretch), then wander.
+            let mut active: Vec<ActivePiece> = Vec::new();
+            let mut sx = 0.0;
+            for k in 0..8 {
+                let want = if k < 5 { 0 } else if k % 2 == 0 { 1 } else { 2 };
+                let idx = (0..pieces.len()).find(|i| pieces[*i].kind == want && !active.iter().any(|a| a.idx == *i));
+                let Some(idx) = idx.or_else(|| (0..pieces.len()).find(|i| !active.iter().any(|a| a.idx == *i))) else { break };
+                active.push(ActivePiece { idx, sx, sz: (k as f32 - 2.0) * 100.0 });
+                sx += pieces[idx].dx;
+            }
+            // Pieces that are not on the track wait out of sight. Pooled items ship parked (out of the simulation), so the
+            // ones on the track are put back first.
+            for (i, piece) in pieces.iter().enumerate() {
+                let on = active.iter().any(|a| a.idx == i);
+                for (body, _) in &piece.bodies {
+                    sim.world.restore_body(*body);
+                    if !on {
+                        sim.world.move_kinematic(*body, Iso::new(Vec3::new(0.0, -3000.0, 0.0), Quat::IDENTITY));
                     }
                 }
-                info!("stage events: {} scrolling track piece(s) at {speed} m/s", pieces.len());
-                state.track = Some(Track { pieces, speed, length: 100.0 });
+                if let Ok(mut v) = visibility.get_mut(piece.entity) {
+                    *v = if on { Visibility::Visible } else { Visibility::Hidden };
+                }
+            }
+            if !pieces.is_empty() {
+                info!("stage events: {} track piece(s) ({} on the track) at {speed} m/s", pieces.len(), active.len());
+                state.track = Some(Track { pieces, active, speed, length: 100.0, ref_z: -30.0 });
             }
             // The train (cars + bogies) sits still on the origin; its NodeFollower forces are not ported.
             let mut held = 0;

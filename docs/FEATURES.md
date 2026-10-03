@@ -51,7 +51,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 | Buoy / Lighthouse / Trawler / Containers / Crane / Wheel | Gerstner sea waves, buoyant ice / buoys / hulls that ride them |
 | Buoy / Trawler | sharks: sleep, search, attack, breach, carry, dive, retreat; they take damage and get knocked out |
 | Trawler | capsize after the sink delay |
-| Train | scrolling track, landslide boulders, cars held in place (no curves yet) |
+| Train | scrolling track with left / right jogs (track shifted under the held train), landslide boulders; cars do not steer or yaw |
 | Gondola | cables take collision damage (game formula) and snap |
 | Rooftop / Crane | birds are **missing** (inactive pooled critters, no exported meshes) |
 

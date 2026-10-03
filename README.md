@@ -115,7 +115,7 @@ tools/harness    optional screenshot / comparison helpers
 
 **What is missing** (details and file pointers in [`docs/STATUS_AND_TODO.md`](docs/STATUS_AND_TODO.md))
 
-- Birds on Rooftop / Crane, curved track sections on the Train stage, the Ring's special object set.
+- Birds on Rooftop / Crane, the train steering along curved track, the Ring's special object set.
 - King of the Hill, Capture the Flag, Big Fight and any online play.
 - The per-part costume editor (hats, faces, voices), animation clips / emotes, swimming and diving moves.
 - Exact per-stage lighting and colour parity (Subway, Incinerator and Ring are hand tuned), water depth fade and foam at

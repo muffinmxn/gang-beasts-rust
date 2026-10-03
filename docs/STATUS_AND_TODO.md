@@ -46,8 +46,8 @@ Done: subway trains, truck roads and wander, Ferris wheel, doors/shutters (`OnTr
 (`PoolSpawner`), fans, elevators (incl. failure), cranes, buoyancy (rides the sea waves), sharks (state machine,
 breach, carry, damage), trawler capsize, train landslide and scrolling track, gondola cables (damage and snap).
 
-- [ ] Train stage: curved track sections and `NodeFollower` (the cars should steer along `TrackNode` chains; the track
-  is straight and the train bodies are held in place).
+- [~] Train stage: left / right track sections are in (the whole track is shifted sideways so the held train stays on its
+  rails). Missing: `NodeFollower` (cars steering and yawing along `TrackNode` chains), landslide start/end pieces.
 - [ ] Birds on Rooftop / Crane (`BirdActor`, `BirdFSM`, `CritterEscalationManager`): the bird nodes are inactive in the
   scene, have no exported meshes and need runtime body creation.
 - [ ] Per-mode object activation (`GamemodeEnabled`) beyond what is special-cased.

@@ -844,6 +844,10 @@ impl World {
     /// pushes dynamic bodies and anchors joints.
     pub fn set_kinematic(&mut self, body: usize, on: bool) {
         unsafe {
+            if on {
+                // PhysX ignores CCD on kinematic bodies (and logs an error): drop the flag first.
+                PxRigidBody_setRigidBodyFlag_mut(self.rb(body), PxRigidBodyFlag::eENABLE_CCD, false);
+            }
             PxRigidBody_setRigidBodyFlag_mut(self.rb(body), PxRigidBodyFlag::eKINEMATIC, on);
         }
         self.bodies[body].kinematic = on;
@@ -852,6 +856,13 @@ impl World {
     /// Rigidbody.MovePosition / MoveRotation on a kinematic body: PhysX sweeps it to `pose` over
     /// the next step, pushing whatever is in the way (the wheel axle, moving platforms).
     pub fn move_kinematic(&mut self, body: usize, pose: Iso) {
+        if !self.bodies[body].kinematic || self.bodies[body].removed {
+            // PhysX rejects kinematic targets on dynamic or removed bodies (and logs an error every call).
+            if std::env::var_os("GB_PHYS_DEBUG").is_some() {
+                eprintln!("move_kinematic skipped: body {} ({}) kinematic={} removed={}", body, self.bodies[body].name, self.bodies[body].kinematic, self.bodies[body].removed);
+            }
+            return;
+        }
         unsafe {
             PxRigidDynamic_setKinematicTarget_mut(
                 self.bodies[body].actor as *mut PxRigidDynamic,
