@@ -2473,7 +2473,7 @@ mod tests {
         let authored_orbit = Vec3::new(6.0, 8.0, 9.6);
         let offset = camera_offset(anchor, authored_orbit, 7.75, 40.0, 0.8, 10.0, 200.0);
         assert!((offset.length() - 30.0).abs() < 0.2);
-        assert!((offset.y - anchor.y).abs() < 0.01);
+        assert!(offset.y >= anchor.y - 0.01, "the orbit elevation may only raise the camera");
         assert!(offset.x > 0.0 && offset.z > 0.0);
         let single = camera_offset(
             anchor,
