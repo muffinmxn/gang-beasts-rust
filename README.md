@@ -96,10 +96,35 @@ tools/harness    optional screenshot / comparison helpers
 
 ## Status
 
-Playable: 23 stages, modes Melee, Gang, Waves (the game's 4-wave data) and Soccer (Alley), local AI
-opponents, costumes, lobby, and many stage events (subway trains, truck roads, Ferris wheel, falling props, doors, fans,
-elevator failure, trawler capsize, shark hunting/breaching/carrying, gondola cables that snap under hits, Gerstner sea waves, train landslide). Work in progress: birds (Rooftop/Crane critters), Train-stage track turns, per-stage graphics parity, animation
-clips, swimming, audio, networking.
+**What works today**
+
+- 20 playable stages (Rooftop, Subway, Grind, Incinerator, Billboard, Blimp, Buoy, Containers, Crane, Elevators, Girders,
+  Gondola, Lighthouse, Ring, Towers, Train, Trawler, Trucks, Vents, Ferris Wheel) plus Alley for Soccer.
+- Modes: Melee, Gang (teams), Waves (the game's four waves with normal, Big and Tiny beasts, enemies come out of the stage
+  door) and Soccer (Alley). Local AI opponents (`B` / `Shift+B` in the lobby), up to 8 fighters on one machine with
+  keyboard and gamepads.
+- Ragdoll beasts on PhysX with the game's movement, grab, punch, lift and damage rules; costumes with per-player colours;
+  a costume editor with a dressed display beast.
+- Stage events: subway trains, truck roads, Ferris wheel, doors, falling props, fans, elevators (with failure), cranes,
+  sharks (hunt, breach, carry, take damage), trawler capsize, train landslide, gondola cables that snap, buoyant ice and
+  buoys on Gerstner sea waves.
+- Lobby (mode / stage / wins / AI / colour, remembered between runs), pause screen, round flow with coinboard, settings for
+  graphics and audio.
+- Sound: menu clicks, music, stage ambience, object impacts from each stage's own audio data, punches, footsteps by
+  surface, voices, KO and round stingers (needs the optional audio extraction below).
+
+**What is missing** (details and file pointers in [`docs/STATUS_AND_TODO.md`](docs/STATUS_AND_TODO.md))
+
+- Birds on Rooftop / Crane, curved track sections on the Train stage, the Ring's special object set.
+- King of the Hill, Capture the Flag, Big Fight and any online play.
+- The per-part costume editor (hats, faces, voices), animation clips / emotes, swimming and diving moves.
+- Exact per-stage lighting and colour parity (Subway, Incinerator and Ring are hand tuned), water depth fade and foam at
+  shorelines, particles.
+- In-match HUD parity (name bars, key prompts), controller rebinding, progression and unlockables.
+- Audio polish: 3D positioned ambience, mixer snapshots, many stage-specific loops.
+
+The full, detailed feature list with every known bug is in [`docs/FEATURES.md`](docs/FEATURES.md); the working to-do list for
+contributors is [`docs/STATUS_AND_TODO.md`](docs/STATUS_AND_TODO.md).
 
 ## Contributing
 
