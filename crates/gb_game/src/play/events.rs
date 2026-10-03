@@ -1007,7 +1007,7 @@ pub fn stage_events(
             let Ok(g) = globals.get(sp.entity) else { continue };
             let off = Vec3::new((r[0] * 2.0 - 1.0) * sp.offset.x, r[1] * sp.offset.y, (r[2] * 2.0 - 1.0) * sp.offset.z);
             let pos = mirror_position(g.translation()) + off;
-            let rot = Quat::from_euler(EulerRot::YXZ, r[3] * 6.283, r[4] * 6.283, r[5] * 6.283);
+            let rot = Quat::from_euler(EulerRot::YXZ, r[3] * std::f32::consts::TAU, r[4] * std::f32::consts::TAU, r[5] * std::f32::consts::TAU);
             let item = &mut sp.items[ii];
             let _ = rot;
             for (body, rest) in &item.bodies {
@@ -1141,7 +1141,7 @@ pub fn stage_events(
     }
     // Debug: GB_RELOAD_TEST=<step> reloads the stage once (exercises the between-rounds reset); GB_ROAD_DEBUG logs a tile.
     if let Some(n) = std::env::var("GB_RELOAD_TEST").ok().and_then(|v| v.parse::<u64>().ok()) {
-        if sim.world.steps as u64 >= n && !DEBUG_RELOADED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if sim.world.steps >= n && !DEBUG_RELOADED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             info!("debug: reload_stage");
             sim.reload_stage();
         }
@@ -2057,7 +2057,6 @@ fn init(
             }
         }
     }
-    let _ = state.trains.iter().map(|t| t.node).count();
     if !state.roads.is_empty() || !state.trucks.is_empty() {
         info!("stage events: {} road tile(s), {} truck(s)", state.roads.len(), state.trucks.len());
     }

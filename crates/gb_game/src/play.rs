@@ -1888,9 +1888,6 @@ fn map_nodes(
                             // Darker and less mirror-like than the raw tint: the grey/white look came from the sky
                             // and fog reflecting in a near-mirror sheet over a pale base.
                             let tone = std::env::var("GB_SEA_TONE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.3);
-                            // Per-sea blue lift: the Ferris wheel's and Trawler's authored grey-green read as mud once lit.
-                            let blue_boost = if c.blue > 0.3 { 1.0 } else { 1.0 };
-                            let _ = blue_boost;
                             sea.base_color = Color::linear_rgba(dec(c.red) * tone * 0.85, dec(c.green) * tone, dec(c.blue) * tone * 1.15, c.alpha.clamp(0.85, 0.98));
                             // Water4 shows mostly its _ReflectionColor (sky/sea blue) over the dark base: take that from the
                             // export for the seas whose base colour is a muddy grey/green (Ferris wheel, Trawler).
