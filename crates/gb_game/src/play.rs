@@ -1258,6 +1258,7 @@ fn mode_hud(
     assets: Res<AssetServer>,
     mut commands: Commands,
     mut hud: Query<(&mut Text, &mut TextColor, &mut Visibility), With<ModeHud>>,
+    mut best: Local<Option<u32>>,
 ) {
     let Some(sim) = sim else { return };
     if hud.is_empty() {
@@ -1280,7 +1281,12 @@ fn mode_hud(
             let left = (sim.round.players.min(sim.actors.len())..sim.actors.len())
                 .filter(|&k| crate::round::alive(sim.actors[k].state) && !sim.parked[k])
                 .count();
-            format!("WAVE {}   ({} left)", sim.round.wave.max(1), left)
+            let best = *best.get_or_insert_with(|| crate::menu::load_prefs()["waves_best"].as_u64().unwrap_or(0) as u32);
+            if best > 0 {
+                format!("WAVE {}   ({} left)   BEST {}", sim.round.wave.max(1), left, best)
+            } else {
+                format!("WAVE {}   ({} left)", sim.round.wave.max(1), left)
+            }
         }
         _ => String::new(),
     };
