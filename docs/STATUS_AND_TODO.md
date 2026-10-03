@@ -74,7 +74,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
   "Custom" preset and carried into matches. Missing: per-item colours,
   voice / face expressions, unlock rules.
 - [ ] Costume physics (dangling parts), animation clips / emotes.
-- [ ] Swim, dive, backflip, double jump, headbutt, elbow (beasts in water are floated by a simple hack).
+- [~] Swimming: beasts in water float and are pushed along the stick (no stroke pose cycle). Missing: dive, backflip, double jump, headbutt, elbow.
 
 ## UI / HUD / meta
 

@@ -1131,6 +1131,32 @@ pub fn stage_events(
                 state.in_water.remove(b);
             }
         }
+        // Swimming (stand-in for the Swim state's stroke cycle): a beast in the water follows its stick with a
+        // paddling push on the hips and chest, so it can swim back to the shore instead of just bobbing.
+        for k in 0..sim.actors.len() {
+            if !crate::round::alive(sim.actors[k].state) || sim.parked[k] {
+                continue;
+            }
+            let hips = sim.actors[k].beast.body(Part::Hips);
+            let p = sim.world.pose(hips).position;
+            let depth = level + wave(p.x, p.z) - p.y;
+            if depth < 0.15 {
+                continue;
+            }
+            let dir = Vec3::new(
+                sim.inputs[k].analogue(gb_logic::input::HORIZONTAL),
+                0.0,
+                sim.inputs[k].analogue(gb_logic::input::VERTICAL),
+            );
+            if dir.length() < 0.1 {
+                continue;
+            }
+            let push = dir.clamp_length_max(1.0) * 9.0 * step_scale;
+            for part in [Part::Hips, Part::Chest] {
+                let body = sim.actors[k].beast.body(part);
+                sim.world.add_force(body, push, 5);
+            }
+        }
         if let Some(at) = splash {
             if now - state.last_splash > 0.3 {
                 state.last_splash = now;
