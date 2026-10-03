@@ -60,7 +60,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 - URP-style post (exposure, contrast, saturation, tonemap), RGBM lightmaps, baked-light skipping, per-stage fog (exact
   surface-fog pass or a crude distance fog on a few stages), sky domes, reflection probes.
 - Water: `water.rs` + `shaders/water.wgsl` (Gerstner vertical swell with distance fade, two scrolling wave normal maps, crest
-  foam). Missing: depth fade, shoreline foam, refraction.
+  foam). Contact foam uses the depth prepass. Missing: depth colour fade, refraction.
 - Hand-tuned stage grades: Ring (no desaturation, -1 EV), Incinerator, Subway (+1 EV). Experimental alternate engine
   (`GB_ENGINE=1`) is off by default.
 

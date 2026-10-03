@@ -59,7 +59,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 - [x] Lightmaps (RGBM), vinyl lightmaps, URP-style post, per-stage fog, sky domes, Gerstner sea (`water.rs`).
 - [~] Per-stage colour grades for Ring, Incinerator and Subway are hand-tuned stand-ins (`main.rs`, env knobs
   `GB_RING_*`, `GB_INC_*`, `GB_SUBWAY_EV`), not matched against real captures.
-- [ ] Water: depth fade, shoreline foam, refraction. Sea LOD tile seams show as thin dark lines at the horizon.
+- [~] Water: contact foam where hulls, ice and buoys meet the surface (depth prepass, `GB_NO_WATER_DEPTH=1` disables). Missing: depth-based colour fade, refraction. Sea LOD tile seams show as thin dark lines at the horizon.
 - [ ] Shadowmask / directional lightmaps / light-probe parity, SSAO and shadow softness parity.
 - [ ] Particles, glass and fog cards; Incinerator fire is an emissive stand-in.
 - [~] Alley: the daytime sky dome is skipped (black backdrop) so the gaps around the court are not blue; the missing front wall is still absent.

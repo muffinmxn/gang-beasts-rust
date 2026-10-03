@@ -880,6 +880,12 @@ fn setup(
             Transform::from_translation(at + Vec3::new(0.0, 3.5, -6.5)).looking_at(at, Vec3::Y),
             play::FollowCam,
         ));
+        // The sea shader reads the opaque depth for shoreline / contact foam (GB_NO_WATER_DEPTH=1 skips it).
+        if matches!(stage.name.as_str(), "buoy" | "lighthouse" | "trawler" | "containers" | "crane" | "wheel")
+            && std::env::var_os("GB_NO_WATER_DEPTH").is_none()
+        {
+            camera.insert(bevy::core_pipeline::prepass::DepthPrepass);
+        }
         if stage.name == "menu" {
             // Menu lobby: the menu drives this camera; no ground-fog approximation (see below).
         } else if let (Some(fog), true) = (&stage.surface_fog, matches!(stage.name.as_str(), "rooftop" | "towers" | "girders" | "billboard")) {

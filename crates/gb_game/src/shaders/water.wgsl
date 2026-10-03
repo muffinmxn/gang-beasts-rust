@@ -7,7 +7,11 @@
     mesh_view_bindings::{globals, view},
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
+    view_transformations::depth_ndc_to_view_z,
 }
+#ifdef DEPTH_PREPASS
+#import bevy_pbr::prepass_utils::prepass_depth
+#endif
 
 struct WaterParams {
     amp: vec4<f32>,
@@ -102,7 +106,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 }
 
 @fragment
-fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
+fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool, @builtin(sample_index) sample_index: u32) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     let t = globals.time;
     // Two scrolling layers of the wave normal map (Water4: _BumpTiling / _BumpDirection * _Time.x).
@@ -114,8 +118,19 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // Crest foam from the wave height.
     let h = gerstner(xz, t * water.misc.y).y * water.misc.x;
     let foam = smoothstep(0.55, 0.95, h / max(dot(water.amp, vec4<f32>(1.0)) * water.misc.x, 0.001)) * water.misc.w;
+    var shore = 0.0;
+#ifdef DEPTH_PREPASS
+    // Shoreline / contact foam where opaque geometry (hulls, ice, buoys) meets the surface (Water4 depth fade).
+    let scene_z = depth_ndc_to_view_z(prepass_depth(in.position, sample_index));
+    let surface_z = depth_ndc_to_view_z(in.position.z);
+    let gap = surface_z - scene_z;
+    if (gap > 0.0) {
+        shore = (1.0 - smoothstep(0.0, 0.45, gap)) * water.misc.w;
+    }
+#endif
+    let foam_all = clamp(foam + shore * 0.9, 0.0, 1.0);
     let base = pbr_input.material.base_color;
-    pbr_input.material.base_color = vec4<f32>(mix(base.rgb, vec3<f32>(0.85, 0.95, 1.0), foam), base.a);
+    pbr_input.material.base_color = vec4<f32>(mix(base.rgb, vec3<f32>(0.85, 0.95, 1.0), foam_all), base.a);
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
