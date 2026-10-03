@@ -87,7 +87,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
   fewer fight, ambience, looping machinery); object impacts from `PhysicAudioEmitter` thresholds and clip lists; punches by
   body area; footsteps by surface; body falls; grunts, effort voices, win laughs; KO and round stingers; shark, cable,
   glass and splash sounds.
-- Missing: 3D positioned loops, mixer snapshots / groups, stage trigger sounds (`SoundOnTriggerEnter`), emotes, countdown
+- Stage trigger sounds (`SoundOnTriggerEnter`) play when a beast enters the volume. Missing: 3D positioned loops, mixer snapshots / groups, emotes, countdown
   voice, Ogg conversion to shrink the 2.6 GB extraction. Loudness values are estimates, tune with the sliders.
 
 ## 9. Tools and debugging

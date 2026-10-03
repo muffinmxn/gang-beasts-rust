@@ -9,6 +9,18 @@ use std::collections::HashMap;
 const VOICES: [&str; 12] = ["BOO", "DEE", "DOF", "GOO", "HUG", "OLO", "OOK", "TUM", "UYU", "WUB", "YEE", "YUP"];
 const GRUNTS: [&str; 5] = ["UU", "DOH", "VERT", "NIE", "MUNGY"];
 
+/// `SoundOnTriggerEnter`: a box volume that plays a random clip when a beast steps into it.
+struct Trigger {
+    pose: gb_phys::Pose,
+    center: Vec3,
+    half: Vec3,
+    clips: Vec<String>,
+    volume: f32,
+    reset: f32,
+    last: f32,
+    inside: std::collections::HashSet<usize>,
+}
+
 struct Emitter {
     name: String,
     soft: Vec<String>,
@@ -30,6 +42,7 @@ pub struct SoundState {
     parents: Vec<Option<usize>>,
     /// node -> clips of its `PlaySoundOnJointBreak` GeneralAudioData.
     break_sounds: HashMap<usize, Vec<String>>,
+    triggers: Vec<Trigger>,
     rng: u32,
     last_foot: HashMap<usize, f32>,
     last_voice: HashMap<usize, f32>,
@@ -124,7 +137,30 @@ fn build(sim: &Sim, st: &mut SoundState, lib: &AudioLib) {
             st.break_sounds.insert(node, clips);
         }
     }
-    info!("audio: {} impact emitters, {} joint-break sounds on {}", st.emitters.len(), st.break_sounds.len(), sim.stage_name);
+    // SoundOnTriggerEnter volumes.
+    let poses = src.world_poses(gb_phys::Pose::IDENTITY);
+    for c in stage_audio["clips"].as_array().into_iter().flatten() {
+        if c["class"].as_str() != Some("SoundOnTriggerEnter") {
+            continue;
+        }
+        let Some(&node) = c["go"].as_i64().and_then(|go| go_node.get(&go)) else { continue };
+        let Some(bx) = src.nodes[node].components.iter().find(|k| k.kind == "BoxCollider") else { continue };
+        let clips: Vec<String> = c["ptrs"]["audioClip"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        if clips.is_empty() {
+            continue;
+        }
+        st.triggers.push(Trigger {
+            pose: poses[node],
+            center: gb_phys::source::vec3(&bx.data["m_Center"]),
+            half: gb_phys::source::vec3(&bx.data["m_Size"]).abs() * 0.5,
+            clips,
+            volume: (c["volume"].as_f64().unwrap_or(0.5) as f32).clamp(0.05, 1.0),
+            reset: 1.0,
+            last: -10.0,
+            inside: Default::default(),
+        });
+    }
+    info!("audio: {} impact emitters, {} joint-break sounds, {} trigger sounds on {}", st.emitters.len(), st.break_sounds.len(), st.triggers.len(), sim.stage_name);
 }
 
 fn emitter_key(st: &SoundState, mut node: usize) -> Option<usize> {
@@ -393,4 +429,42 @@ fn now_voice_ok(st: &mut SoundState, k: usize, sim: &Sim) -> bool {
 
 fn alive_first(sim: &Sim) -> Option<usize> {
     (0..sim.actors.len()).find(|&k| crate::round::alive(sim.actors[k].state) && !sim.parked.get(k).copied().unwrap_or(false))
+}
+
+/// Beasts stepping into `SoundOnTriggerEnter` volumes (splash zones, fish and slime touches, ...).
+pub fn trigger_sounds(sim: &Sim, st: &mut SoundState, sfx: &mut Sfx, lib: &AudioLib) {
+    if !sfx.enabled || !st.built || st.triggers.is_empty() {
+        return;
+    }
+    let now = sim.world.steps as f32 * sim.world.settings.fixed_timestep;
+    let hips: Vec<(usize, Vec3)> = sim
+        .actors
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| !sim.parked.get(*k).copied().unwrap_or(false))
+        .map(|(k, a)| (k, sim.world.pose(a.beast.body(Part::Hips)).position))
+        .collect();
+    let mut plays: Vec<(usize, Vec3)> = Vec::new();
+    for (ti, t) in st.triggers.iter_mut().enumerate() {
+        for (k, p) in &hips {
+            let local = t.pose.rotation.inverse() * (*p - t.pose.position) / t.pose.scale.max(Vec3::splat(1e-4));
+            let in_box = (local - t.center).abs().cmple(t.half).all();
+            if in_box {
+                if t.inside.insert(*k) && now - t.last > t.reset {
+                    t.last = now;
+                    plays.push((ti, *p));
+                }
+            } else {
+                t.inside.remove(k);
+            }
+        }
+    }
+    for (ti, p) in plays {
+        let list = st.triggers[ti].clips.clone();
+        let volume = st.triggers[ti].volume;
+        if let Some(clip) = st.pick(&list).cloned() {
+            sfx.play_at(&clip, volume, 1.0, mirror_position(p));
+        }
+    }
+    let _ = lib;
 }

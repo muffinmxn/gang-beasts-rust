@@ -1551,6 +1551,7 @@ fn simulate(
     sim.world.step();
     sounds::contact_sounds(sim, &mut sound_state, &mut sfx, &lib);
     sounds::round_sounds(sim, &mut sound_state, &mut sfx, &lib);
+    sounds::trigger_sounds(sim, &mut sound_state, &mut sfx, &lib);
     // Lobby (BeastMenuSpawner): beasts stand on their marker and should hold that pose instead of
     // slumping into a heap while the player picks a costume. Every body gets a velocity spring
     // toward its spawn pose (position + rotation), which keeps the whole ragdoll upright without
