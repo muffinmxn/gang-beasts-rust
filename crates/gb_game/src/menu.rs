@@ -2117,6 +2117,18 @@ fn write_prefs(value: &serde_json::Value) {
 /// Default audio mix (master, music, effects) in tenths; the game is mixed quietly so music sits under the effects.
 pub const DEFAULT_VOL: (u32, u32, u32) = (5, 3, 6);
 
+/// Persist the mix from the in-match pause screen (tenths).
+pub fn save_audio_tenths(master: u32, music: u32, sfx: u32) {
+    let mut value = load_prefs();
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["vol_master"] = master.into();
+    value["vol_music"] = music.into();
+    value["vol_sfx"] = sfx.into();
+    write_prefs(&value);
+}
+
 fn save_prefs_audio(menu: &Menu) {
     let mut value = load_prefs();
     if !value.is_object() {

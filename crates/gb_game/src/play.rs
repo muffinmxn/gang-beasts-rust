@@ -2819,7 +2819,7 @@ fn spawn_pause_ui(mut commands: Commands, assets: Res<AssetServer>) {
                 TextLayout::new_with_justify(JustifyText::Center),
             ));
             panel.spawn((
-                Text::new("ESC / START   RESUME\nM   MAIN MENU\nQ   QUIT"),
+                Text::new("ESC / START   RESUME\n- / +   VOLUME\nM   MAIN MENU\nQ   QUIT"),
                 TextFont {
                     font: assets.load("ui/fonts/NotoSans-Black.ttf"),
                     font_size: 20.0,
@@ -2837,6 +2837,7 @@ fn toggle_pause(
     pads: Query<&Gamepad>,
     mut overlay: Query<&mut Visibility, With<PauseOverlay>>,
     mut exit: EventWriter<AppExit>,
+    mut sfx: ResMut<crate::audio::Sfx>,
 ) {
     if sim.lobby {
         return;
@@ -2856,6 +2857,23 @@ fn toggle_pause(
     }
     if !sim.paused {
         return;
+    }
+    // - / + change the master volume while paused (saved for the next launch).
+    let delta = if keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd) {
+        1.0
+    } else if keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract) {
+        -1.0
+    } else {
+        0.0
+    };
+    if delta != 0.0 {
+        sfx.master = ((sfx.master * 10.0).round() + delta).clamp(0.0, 10.0) / 10.0;
+        crate::menu::save_audio_tenths(
+            (sfx.master * 10.0).round() as u32,
+            (sfx.music_gain * 10.0).round() as u32,
+            (sfx.sfx_gain * 10.0).round() as u32,
+        );
+        sfx.play("GB menu blip", 0.6, 1.0);
     }
     if keys.just_pressed(KeyCode::KeyM) {
         match std::env::current_exe()
