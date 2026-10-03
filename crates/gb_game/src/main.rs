@@ -1389,6 +1389,12 @@ fn post_stack(
             std::env::var("GB_TOWERS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(18.0),
             std::env::var("GB_TOWERS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.35),
         )
+    } else if stage_name == "vents" {
+        // The fan chamber is a bright cream room in the retail game; the baked light barely reaches it here.
+        (
+            std::env::var("GB_VENTS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(8.0),
+            std::env::var("GB_VENTS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(1.4),
+        )
     } else if stage_name == "incinerator" {
         (
             std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0),
