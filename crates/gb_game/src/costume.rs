@@ -584,7 +584,16 @@ fn bind(
                                 .map(|(node, _)| *node)
                             {
                                 let bind = bind_world(sim.beast_sidecar(), bone_node);
-                                let local = bind.inverse() * kid_world.affine();
+                                // Eyewear pieces ship a bare `actor_head_collider` at the origin instead of the posed
+                                // rig, so the bind-pose maths would drop the part at the feet: keep its offset
+                                // relative to that placeholder bone instead.
+                                let placeholder = globals.get(e).ok().filter(|g| {
+                                    g.translation().length() < 0.05 && bind.w_axis.truncate().length() > 0.5
+                                });
+                                let local = match placeholder {
+                                    Some(bone) => Mat4::from(bone.affine().inverse()) * Mat4::from(kid_world.affine()),
+                                    None => bind.inverse() * Mat4::from(kid_world.affine()),
+                                };
                                 let (scale, rotation, translation) =
                                     local.to_scale_rotation_translation();
                                 commands.entity(kid).insert(Transform {

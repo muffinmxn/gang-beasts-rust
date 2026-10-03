@@ -71,7 +71,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 
 - [x] Costume presets, per-player colour, unseen-mesh removal, tint model, per-player costumes carried into the match.
 - [~] Costume editor: preset, per-slot items (head, eyewear, face, body, back, legs) and colour; the outfit is saved as the
-  "Custom" preset and carried into matches. Some eyewear items attach at the feet (binding bug). Missing: per-item colours,
+  "Custom" preset and carried into matches. Missing: per-item colours,
   voice / face expressions, unlock rules.
 - [ ] Costume physics (dangling parts), animation clips / emotes.
 - [ ] Swim, dive, backflip, double jump, headbutt, elbow (beasts in water are floated by a simple hack).

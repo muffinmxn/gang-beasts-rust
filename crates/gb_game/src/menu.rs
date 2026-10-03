@@ -1150,7 +1150,7 @@ fn cycle_for_capture(
                 if let Some(actor) = menu.editor_actor {
                     for slot in 0..6 {
                         let choices = costumes.slot_items(slot as u32 + 1);
-                        menu.editor_picks[slot] = choices.get(5).copied();
+                        menu.editor_picks[slot] = if slot == 1 || std::env::var_os("GB_EDITOR_ALL").is_some() { choices.get(std::env::var("GB_EDITOR_ITEM").ok().and_then(|v| v.parse().ok()).unwrap_or(5)).copied() } else { None };
                     }
                     let picks = menu.editor_picks;
                     costumes.apply_custom(actor, &picks);
