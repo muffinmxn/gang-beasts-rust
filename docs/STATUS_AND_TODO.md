@@ -48,6 +48,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 
 - [~] Train stage: left / right track sections are in (the whole track is shifted sideways so the held train stays on its
   rails). Missing: `NodeFollower` (cars steering and yawing along `TrackNode` chains), landslide start/end pieces.
+- [x] Camera height now follows the orbit offset elevation (matches the retail high-angle framing on Lighthouse, Wheel, Billboard, Grind); `GB_CAM_NO_ELEV=1` restores the old flat height.
 - [ ] Birds on Rooftop / Crane (`BirdActor`, `BirdFSM`, `CritterEscalationManager`): the bird nodes are inactive in the
   scene, have no exported meshes and need runtime body creation.
 - [ ] Per-mode object activation (`GamemodeEnabled`) beyond what is special-cased.

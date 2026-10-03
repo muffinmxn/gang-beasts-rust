@@ -1732,6 +1732,13 @@ fn init(
             for (b, _) in &bodies {
                 sim.world.set_kinematic(*b, true);
             }
+            // The retail Buoy stage has no sharks (the scene still carries them): park them far below.
+            if sim.stage_name == "buoy" {
+                for (b, _) in &bodies {
+                    sim.world.move_kinematic(*b, Iso::new(Vec3::new(0.0, -3000.0, 0.0), Quat::IDENTITY));
+                }
+                continue;
+            }
             let node_pos = |key: &str| -> Vec<Vec3> {
                 shark[key]
                     .as_array()
