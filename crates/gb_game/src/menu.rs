@@ -828,11 +828,16 @@ fn setup(
         current: start,
         selected,
         wins: prefs["wins"].as_u64().map_or(3, |w| (w as u32).clamp(1, 10)),
-        stage_index: prefs["stage"]
-            .as_str()
-            .and_then(|name| stages.iter().position(|s| s == name))
-            .or_else(|| stages.iter().position(|s| s == "rooftop"))
-            .unwrap_or(0),
+        // `stages.len()` is the "Random" entry.
+        stage_index: if prefs["stage"].as_str() == Some("random") {
+            stages.len()
+        } else {
+            prefs["stage"]
+                .as_str()
+                .and_then(|name| stages.iter().position(|s| s == name))
+                .or_else(|| stages.iter().position(|s| s == "rooftop"))
+                .unwrap_or(0)
+        },
         mode: match std::env::var("GB_MODE") {
             Ok(id) => crate::round::Mode::from_id(&id),
             Err(_) => crate::round::Mode::from_id(prefs["mode"].as_str().unwrap_or("")),
@@ -1583,7 +1588,7 @@ fn input(
         let all = crate::round::Mode::ALL;
         let at = all.iter().position(|m| *m == menu.mode).unwrap_or(0);
         menu.mode = all[if lobby_right { (at + 1) % all.len() } else { (at + all.len() - 1) % all.len() }];
-        if !stage_allowed(menu.mode, menu.stages.get(menu.stage_index).map_or("", String::as_str)) {
+        if menu.stage_index < menu.stages.len() && !stage_allowed(menu.mode, &menu.stages[menu.stage_index]) {
             let mode = menu.mode;
             if let Some(i) = menu.stages.iter().position(|s| stage_allowed(mode, s)) {
                 menu.stage_index = i;
@@ -1594,7 +1599,8 @@ fn input(
     if menu.current == LOBBY && (lobby_left || lobby_right) && key == "MENU_STAGE" {
         // The stage row cycles the exported stages (the launch used to hardcode "rooftop").
         if !menu.stages.is_empty() {
-            let n = menu.stages.len();
+            // Entries 0..n are the stages, n is "Random".
+            let n = menu.stages.len() + 1;
             for _ in 0..n {
                 menu.stage_index = if lobby_right {
                     (menu.stage_index + 1) % n
@@ -1603,7 +1609,7 @@ fn input(
                 } else {
                     menu.stage_index - 1
                 };
-                if stage_allowed(menu.mode, &menu.stages[menu.stage_index]) {
+                if menu.stage_index == n - 1 || stage_allowed(menu.mode, &menu.stages[menu.stage_index]) {
                     break;
                 }
             }
@@ -1735,11 +1741,18 @@ fn input(
                     // Everyone who joined in the lobby plays (at least one fighter).
                     let players = menu.joined.clamp(1, 8);
                     // Show the OG loading screen first, then hand off to the match process.
-                    let stage = menu
-                        .stages
-                        .get(menu.stage_index)
-                        .cloned()
-                        .unwrap_or_else(|| "rooftop".to_string());
+                    let stage = match menu.stages.get(menu.stage_index) {
+                        Some(s) => s.clone(),
+                        None => {
+                            // "Random": any stage this mode can be played on.
+                            let mode = menu.mode;
+                            let pool: Vec<&String> = menu.stages.iter().filter(|s| stage_allowed(mode, s)).collect();
+                            let seed = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0, |d| d.subsec_nanos() as usize);
+                            pool.get(seed % pool.len().max(1)).map_or_else(|| "rooftop".to_string(), |s| (*s).clone())
+                        }
+                    };
                     menu.launch_args = vec![
                         stage,
                         "--players".into(),
@@ -1996,7 +2009,7 @@ fn layout(
                 menu.stages
                     .get(menu.stage_index)
                     .map(|s| stage_label(s))
-                    .unwrap_or_else(|| "Rooftop".to_string()),
+                    .unwrap_or_else(|| "Random".to_string()),
             ),
             Some("SETTINGS_AUDIO_MASTER") => Some(format!("Master: {}%", menu.vol_master * 10)),
             Some("SETTINGS_AUDIO_MUSIC") => Some(format!("Music: {}%", menu.vol_music * 10)),
@@ -2147,7 +2160,7 @@ fn save_prefs(menu: &Menu) {
     }
     let fresh = serde_json::json!({
         "mode": menu.mode.id(),
-        "stage": menu.stages.get(menu.stage_index),
+        "stage": menu.stages.get(menu.stage_index).map_or("random", String::as_str),
         "wins": menu.wins,
         "bots": menu.bots,
         "colour": menu.player_color,

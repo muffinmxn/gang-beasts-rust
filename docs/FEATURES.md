@@ -73,7 +73,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 
 ## 7. Menus and UI
 
-- Menu scene from the game (camera glides between screens), lobby with join / ready, mode / wins / stage rows (Wins hidden
+- Menu scene from the game (camera glides between screens), lobby with join / ready, mode / wins / stage rows (a Random stage option, Wins hidden
   for Waves, stages filtered by mode), AI count, colour and costume keys, remembered choices
   (`%APPDATA%/gb-rust/lobby.json`), loading splash, pause screen (resume / volume / menu / quit).
 - Settings: graphics rows, **audio sliders** (master / music / effects), controls help.
