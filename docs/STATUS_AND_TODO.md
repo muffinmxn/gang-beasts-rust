@@ -62,7 +62,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 - [ ] Water: depth fade, shoreline foam, refraction. Sea LOD tile seams show as thin dark lines at the horizon.
 - [ ] Shadowmask / directional lightmaps / light-probe parity, SSAO and shadow softness parity.
 - [ ] Particles, glass and fog cards; Incinerator fire is an emissive stand-in.
-- [ ] Soccer / Alley: black patches at the screen edges (missing background geometry).
+- [~] Alley: the daytime sky dome is skipped (black backdrop) so the gaps around the court are not blue; the missing front wall is still absent.
 - [~] Grind: the follow camera is capped at 32 m so it stays inside the room (the authored 200 m zoom-out showed the
   unlit black exterior shell and Void boxes). Lightmapped vinyl surfaces use only the lightmap, so the shell outside the
   baked area is black; `GB_LM_DEBUG=1` prints lightmap stats.

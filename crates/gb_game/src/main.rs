@@ -663,8 +663,13 @@ fn setup(
     stage: Res<ViewerConfig>,
 ) {
     if let Some(fog) = &stage.surface_fog {
-        sky::spawn_dome(&mut commands, &mut meshes, &mut materials, fog);
-        commands.insert_resource(ClearColor(fog.sky));
+        // The Alley is walled in by black void boxes; its daytime sky dome only shows through the gaps.
+        if stage.name == "alley" {
+            commands.insert_resource(ClearColor(Color::BLACK));
+        } else {
+            sky::spawn_dome(&mut commands, &mut meshes, &mut materials, fog);
+            commands.insert_resource(ClearColor(fog.sky));
+        }
     }
     let mut lightmaps = HashMap::new();
     for assignment in &stage.lightmap_assignments {
