@@ -1208,10 +1208,43 @@ fn soccer(sim: &mut Sim) {
     if std::env::var_os("GB_SOCCER_TRACE").is_some() && sim.world.steps % 150 == 0 {
         info!("soccer ball at step {}: {:?}", sim.world.steps, p);
     }
+    // Bots have no kick: a bot that has the ball at its feet carries it toward the goal it attacks (a dribble assist,
+    // 6 m/s^2 along the pitch, with a pull back toward the centre line so the ball stays off the side walls).
+    if sim.round.mode == crate::round::Mode::Soccer {
+        let humans = sim.round.players.min(sim.actors.len());
+        let mut push = Vec3::ZERO;
+        for k in humans..sim.actors.len() {
+            if sim.parked[k] || !crate::round::alive(sim.actors[k].state) {
+                continue;
+            }
+            let hip = sim.world.pose(sim.actors[k].beast.body(Part::Hips)).position;
+            if Vec3::new(hip.x - p.x, 0.0, hip.z - p.z).length() < 1.3 {
+                let team = sim.round.mode.team_of(k);
+                if let Some(goal) = sim.goals.iter().find(|g| g.0 != team).map(|g| g.1) {
+                    let to = Vec3::new(goal.x - p.x, 0.0, goal.z - p.z);
+                    push += to.normalize_or_zero() * 6.0;
+                    push.z += (goal.z - p.z).clamp(-1.0, 1.0) * 3.0;
+                }
+            }
+        }
+        if push != Vec3::ZERO {
+            sim.world.add_force(body, push.clamp_length_max(8.0), 5);
+        }
+    }
     let mut scored: Option<usize> = None;
     for (team, c, r, h) in &sim.goals {
         let local = r.inverse() * (p - *c);
-        if local.abs().cmple(*h).all() {
+        // The goal trigger is only 0.2 m thick but the net / back wall stops the ball's centre about 0.3 m short of
+        // it, so give the thin axis some depth.
+        let mut h = *h;
+        if h.z <= h.x && h.z <= h.y {
+            h.z += 0.5;
+        } else if h.x <= h.y {
+            h.x += 0.5;
+        } else {
+            h.y += 0.5;
+        }
+        if local.abs().cmple(h).all() {
             scored = Some(1 - (*team).min(1));
         }
     }
@@ -1372,7 +1405,20 @@ fn bot_inputs(sim: &mut Sim) {
                         }
                         _ => aim,
                     };
-                    let target = if (aim - me).length() < 1.1 { drive } else { aim };
+                    let mut target = if (aim - me).length() < 1.1 { drive } else { aim };
+                    // Only the bot closest to the ball on each team chases it; the others hold a spot between the
+                    // ball and their own goal so four beasts do not pile into the ball and wedge it on a wall.
+                    let team = mode.team_of(k);
+                    let mine = (hips[k] - ball).length();
+                    let chaser = (humans..n).all(|j| {
+                        j == k || !alive[j] || mode.team_of(j) != team || (hips[j] - ball).length() > mine - 0.01 * (j < k) as u8 as f32
+                    });
+                    if !chaser {
+                        if let Some(own) = sim.goals.iter().find(|g| g.0 == team).map(|g| g.1) {
+                            target = ball + (own - ball) * 0.45;
+                            target.z = target.z.clamp(own.z - 3.5, own.z + 3.5);
+                        }
+                    }
                     best = Some(((target - me).length().max(REACH + 0.1), target));
                 }
             }

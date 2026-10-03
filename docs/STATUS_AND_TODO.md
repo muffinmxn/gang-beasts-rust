@@ -38,7 +38,7 @@ then verify with an offscreen render (`GB_WINDOW_OFFSCREEN=1 GB_SCREENSHOT=out.p
 
 - [x] `ControlHandeler_Computer` timings, per-type `AIProfile` (Normal / Big / Tiny), ledge check, stuck -> jump.
 - [ ] Real NavMesh-style routing (they walk in straight lines; Waves enemies have a special door waypoint).
-- [ ] Soccer: bots wedge the ball into walls. Needs proper pathing around the ball.
+- [~] Soccer: one chaser per team, the rest hold a defensive spot; a dribble assist carries the ball (bots have no kick). Bots now score a few goals per minute.
 
 ## Stage events (`play/events.rs`)
 
