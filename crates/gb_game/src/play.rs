@@ -2738,8 +2738,8 @@ fn camera_offset(
         let elev = orbit_offset.y.atan2(flat);
         height = height.max(distance * elev.sin()).min(distance - 0.5);
     }
-    // Never steeper than ~48 degrees: stages whose marker sits high above the target (Containers) looked straight down.
-    let height = height.min(distance * 0.74);
+    // Never steeper than ~40 degrees: stages whose marker sits high above the target (Containers) looked straight down.
+    let height = height.min(distance * 0.64);
     let horizontal = (distance * distance - height * height).sqrt();
     let orbit = Vec3::new(orbit_offset.x, 0.0, orbit_offset.z).normalize_or_zero();
     orbit * horizontal + Vec3::Y * height
