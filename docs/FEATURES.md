@@ -49,7 +49,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 | Elevators | shuttling cars and a cable-snap malfunction |
 | Crane / Containers | driven cranes slide along their gantry, container colours |
 | Buoy / Lighthouse / Trawler / Containers / Crane / Wheel | Gerstner sea waves, buoyant ice / buoys / hulls that ride them |
-| Buoy / Trawler | sharks: sleep, search, attack, breach, carry, dive, retreat; they take damage and get knocked out |
+| Buoy / Trawler | sharks: sleep, search, attack, breach, carry, dive, retreat; the jaw opens when chasing; they take damage and get knocked out |
 | Trawler | capsize after the sink delay |
 | Train | scrolling track with left / right jogs (track shifted under the held train), landslide boulders; cars do not steer or yaw |
 | Gondola | cables take collision damage (game formula) and snap |

@@ -127,6 +127,9 @@ struct Shark {
     start_at: f32,
     health: f32,
     max_health: f32,
+    /// The jaw rigidbody and its hinge (the jaw node's pivot) for the open / close animation.
+    jaw: Option<(usize, Vec3)>,
+    jaw_open: f32,
 }
 
 impl Shark {
@@ -158,6 +161,8 @@ impl Shark {
             start_at: 0.0,
             health: 100.0,
             max_health: 100.0,
+            jaw: None,
+            jaw_open: 0.0,
         }
     }
 }
@@ -222,6 +227,11 @@ fn shark_step(sh: &mut Shark, sim: &mut Sim, level: f32, dt: f32, edt: f32, now:
         sh.state_len = sh.sleep.0 + r[0] * (sh.sleep.1 - sh.sleep.0);
     }
     sh.timer += edt;
+    {
+        let target = jaw_target(sh, sim);
+        let k = (6.0 * dt).min(1.0);
+        sh.jaw_open += (target - sh.jaw_open) * k;
+    }
     // CheckDamage / CheckHealth: beasts that hit the shark hurt it; it regains 1 health/s and, at 0, is knocked out
     // (drops its catch and goes back to sleep for up to `maxUnconsciousTime`).
     {
@@ -398,9 +408,33 @@ fn grab(sh: &mut Shark, sim: &mut Sim, actor: usize) {
 
 fn apply_shark(sh: &Shark, sim: &mut Sim) {
     let rot = Quat::from_rotation_arc(sh.fwd0, sh.dir.normalize_or(sh.fwd0));
+    // The jaw swings down about its hinge (axis = up x forward turns the mouth tip toward -Y).
+    let fwd = rot * sh.fwd0;
+    let jaw_rot = Quat::from_axis_angle(Vec3::Y.cross(fwd).normalize_or(Vec3::X), sh.jaw_open);
     for (b, rest) in &sh.bodies {
-        let p = sh.pos + rot * (rest.position - sh.centre);
-        sim.world.move_kinematic(*b, Iso::new(p, rot * rest.rotation));
+        let mut p = sh.pos + rot * (rest.position - sh.centre);
+        let mut q = rot * rest.rotation;
+        if let Some((jaw, hinge)) = sh.jaw.filter(|(jaw, _)| jaw == b) {
+            let _ = jaw;
+            let pivot = sh.pos + rot * (hinge - sh.centre);
+            p = pivot + jaw_rot * (p - pivot);
+            q = jaw_rot * q;
+        }
+        sim.world.move_kinematic(*b, Iso::new(p, q));
+    }
+}
+
+/// Mouth angle target by state: open while chasing / leaping / just before biting, shut while carrying.
+fn jaw_target(sh: &Shark, sim: &Sim) -> f32 {
+    let near = sh.target.is_some_and(|a| {
+        let hips = sim.world.pose(sim.actors[a].beast.body(Part::Hips)).position;
+        (hips - (sh.pos + sh.dir * sh.mouth)).length() < 7.0
+    });
+    match sh.state {
+        SharkState::Attacking | SharkState::Breaching if near => 0.7,
+        SharkState::Attacking | SharkState::Breaching => 0.25,
+        SharkState::Carrying => 0.05,
+        _ => 0.0,
     }
 }
 
@@ -1715,6 +1749,11 @@ fn init(
                 start_at: f("startDelay", 60.0) * (0.9 + 0.2 * r),
                 health: f("health", 100.0),
                 max_health: f("maxHealth", 100.0),
+                jaw: shark["jaw"]["node"].as_u64().and_then(|n| {
+                    let body = *sim.world.instances[inst].bodies.get(&(n as usize))?;
+                    Some((body, poses_s.get(n as usize)?.position))
+                }),
+                jaw_open: 0.0,
             });
         }
         if !state.sharks.is_empty() {

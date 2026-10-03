@@ -52,7 +52,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
   scene, have no exported meshes and need runtime body creation.
 - [ ] Per-mode object activation (`GamemodeEnabled`) beyond what is special-cased.
 - [ ] Towers `SlowDestroyTowersStairwell`, billboard/girders joint-break tuning, `TrucksMoveRoadVertex` wobble.
-- [~] Sharks: jaw animation not ported. Elevators / sharks / cranes are tuned by eye.
+- [~] Sharks: the jaw opens while chasing / leaping and shuts when carrying (kinematic hinge swing, no jaw joint physics). Elevators / sharks / cranes are tuned by eye.
 
 ## Graphics
 
