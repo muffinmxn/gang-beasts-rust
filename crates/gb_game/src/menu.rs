@@ -587,9 +587,10 @@ fn setup(
                     loading: false,
                 });
             };
-            hint("<  >  COLOUR   Q/E", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.42), 40.0);
-            hint("Z X  COSTUME   SHIFT <  >", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.34), 40.0);
-            hint("B / SHIFT B  AI PLAYERS", Vec2::new(canvas_size.x * 0.36, canvas_size.y * 0.26), 40.0);
+            // Controls help sits bottom-left, clear of the option rows and the SUBMIT / BACK prompts on the right.
+            hint("< >  or  Q E :  colour", Vec2::new(-canvas_size.x * 0.30, -canvas_size.y * 0.30), 30.0);
+            hint("Z X :  costume", Vec2::new(-canvas_size.x * 0.30, -canvas_size.y * 0.36), 30.0);
+            hint("B  /  Shift B :  add / remove AI", Vec2::new(-canvas_size.x * 0.30, -canvas_size.y * 0.42), 30.0);
             hint("SUBMIT", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.40), 40.0);
             hint("BACK", Vec2::new(canvas_size.x * 0.36, -canvas_size.y * 0.46), 40.0);
         }
@@ -1994,7 +1995,7 @@ fn layout(
             Some("MENU_STAGE") if t.text == "Random" => Some(
                 menu.stages
                     .get(menu.stage_index)
-                    .cloned()
+                    .map(|s| stage_label(s))
                     .unwrap_or_else(|| "Rooftop".to_string()),
             ),
             Some("SETTINGS_AUDIO_MASTER") => Some(format!("Master: {}%", menu.vol_master * 10)),
@@ -2182,6 +2183,21 @@ fn hide_static_rigs(
         if !in_sim {
             commands.entity(e).insert(Visibility::Hidden);
             hidden.push(e);
+        }
+    }
+}
+
+/// "rooftop" -> "Rooftop"; the export names that need more than a capital letter.
+fn stage_label(name: &str) -> String {
+    match name {
+        "lighthouse" => "Lighthouse".into(),
+        "wheel" => "Ferris Wheel".into(),
+        "vents" => "Fans".into(),
+        "grind" => "Grinders".into(),
+        "containers" => "Containers".into(),
+        other => {
+            let mut c = other.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
         }
     }
 }
