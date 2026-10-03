@@ -1384,6 +1384,11 @@ fn post_stack(
             std::env::var("GB_GIRDERS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(22.0),
             std::env::var("GB_GIRDERS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.6),
         )
+    } else if stage_name == "towers" {
+        (
+            std::env::var("GB_TOWERS_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(18.0),
+            std::env::var("GB_TOWERS_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(0.35),
+        )
     } else if stage_name == "incinerator" {
         (
             std::env::var("GB_INC_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0),
