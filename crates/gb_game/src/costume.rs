@@ -284,21 +284,15 @@ fn redress(
         commands.entity(entity).remove::<MaskedBody>();
     }
     // Re-parented rigid parts first: they hang off beast bones, not off the piece root.
-    for (entity, attachment) in &attachments {
-        for descendant in children.iter_descendants(entity) {
-            commands.entity(descendant).despawn();
-        }
-        commands.entity(entity).despawn();
-        let _ = attachment;
+    // `despawn` is recursive in Bevy 0.16, so a scene root's spawned meshes cannot survive the switch (that is how cosmetics
+    // were staying on the beast); despawning descendants one by one as well only produced "entity does not exist" warnings.
+    for (entity, _attachment) in &attachments {
+        commands.entity(entity).try_despawn();
     }
     for entity in &pieces {
-        // Despawn descendants too: a scene root's spawned meshes must not survive the switch,
-        // which is how cosmetics were staying on the beast after a costume change.
-        for descendant in children.iter_descendants(entity) {
-            commands.entity(descendant).despawn();
-        }
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
+    let _ = &children;
     costumes.applied.clear();
 }
 
