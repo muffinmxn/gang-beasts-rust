@@ -77,11 +77,11 @@ target\debug\gb_game.exe subway --players 2 --wins 3 --mode gang
 ```
 
 Useful options: `--assets <dir>` (default `assets\export`), `--players N`, `--wins N`,
-`--mode melee|gang|waves|football|rumble`, `--bots N` (local AI opponents), `--spawn N`, `--player-color N`,
-`--costume <preset name>`. Soccer is played on `alley`, Rumble on `ring`.
+`--mode melee|gang|waves|football`, `--bots N` (local AI opponents), `--spawn N`, `--player-color N`,
+`--costume <preset name>`. Soccer is played on `alley`.
 Many `GB_*` environment variables tune rendering and gameplay; press **F2** in game for the live knob panel.
 
-Lobby controls: `Q`/`E` (or ←/→) change colour, `Z`/`X` (or Shift + ←/→) change costume, `B` add an AI player (up to 5) and `Shift+B` remove one. The Mode row picks Melee, Gang, Waves, Soccer or Rumble and the Stage row only lists maps that mode can be played on. Your choices (mode, stage, wins, AI count, colour) and your best Waves run are remembered in `%APPDATA%\gb-rust\lobby.json`. Gameplay controls are
+Lobby controls: `Q`/`E` (or ←/→) change colour, `Z`/`X` (or Shift + ←/→) change costume, `B` add an AI player (up to 5) and `Shift+B` remove one. The Mode row picks Melee, Gang, Waves or Soccer and the Stage row only lists maps that mode can be played on. Your choices (mode, stage, wins, AI count, colour) and your best Waves run are remembered in `%APPDATA%\gb-rust\lobby.json`. Gameplay controls are
 listed by the in-game pause/controls screen.
 
 ## Layout
@@ -96,7 +96,7 @@ tools/harness    optional screenshot / comparison helpers
 
 ## Status
 
-Playable: 23 stages, modes Melee, Gang, Waves (the game's 4-wave data), Soccer (Alley) and Rumble (Ring), local AI
+Playable: 23 stages, modes Melee, Gang, Waves (the game's 4-wave data) and Soccer (Alley), local AI
 opponents, costumes, lobby, and many stage events (subway trains, truck roads, Ferris wheel, falling props, doors, fans,
 elevator failure, trawler capsize, shark hunting/breaching/carrying, gondola cables that snap under hits, Gerstner sea waves, train landslide). Work in progress: birds (Rooftop/Crane critters), Train-stage track turns, per-stage graphics parity, animation
 clips, swimming, audio, networking.

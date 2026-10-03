@@ -30,8 +30,7 @@ then verify with an offscreen render (`GB_WINDOW_OFFSCREEN=1 GB_SCREENSHOT=out.p
   - [ ] Only Rooftop / Subway / Grind / Incinerator are offered; Chute and Aquarium are test-only stages.
 - [~] Soccer (Alley): ball, goals, score HUD, kick-off reset. Bots dribble toward the goal but rarely score
   (see "Bots"). Costumed beasts do not show their team colour.
-- [~] Rumble (Ring): timed entrants walk into the ring. The Rumble-only object set (railings, entrance triggers,
-  `GamemodeEnabled`) is not applied: those nodes have no exported meshes.
+- [x] Rumble was removed (it is not a mode of the retail game).
 - [ ] King of the Hill, Capture the Flag, Big Fight (enum values exist in the game; not in the menu).
 - [ ] Online / networking (everything is local).
 
@@ -75,7 +74,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 
 - [x] Lobby (mode/stage/wins/AI/colour, remembered between runs), loading screen, round banner and coinboard.
 - [ ] In-match HUD parity: name bars, timers, key prompts (needs real captures to match).
-- [ ] Settings screens are wired for graphics only; controls rebinding is not.
+- [~] Settings: graphics and audio (master / music / effects) are wired; controls rebinding is not.
 - [ ] Save / progression / unlockables.
 
 ## Audio (`crates/gb_game/src/audio.rs`)

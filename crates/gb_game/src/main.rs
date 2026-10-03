@@ -1341,7 +1341,7 @@ fn post_stack(
     // Incinerator's fog/sky are saturated orange-red and the whole room read as a red wash; pull
     // the colour back a little and lift it (per-stage stand-in until its lightmaps are ported).
     let (sat_adj, ev_adj) = if stage_name == "ring" {
-        (std::env::var("GB_RING_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(-70.0), std::env::var("GB_RING_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(-0.5))
+        (std::env::var("GB_RING_SAT").ok().and_then(|x| x.parse().ok()).unwrap_or(0.0), std::env::var("GB_RING_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(-1.0))
     } else if stage_name == "subway" {
         // Subway reads far too dark against the retail platform; lift exposure (stand-in until its lightmaps match).
         (0.0, std::env::var("GB_SUBWAY_EV").ok().and_then(|x| x.parse().ok()).unwrap_or(1.0))
