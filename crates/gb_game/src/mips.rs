@@ -68,7 +68,7 @@ pub fn mip_chain(data: &[u8], width: u32, height: u32, srgb: bool) -> (Vec<u8>, 
 }
 
 /// On every newly loaded RGBA8 texture without mips: add the chain and a trilinear sampler.
-pub fn generate(mut events: EventReader<AssetEvent<Image>>, mut images: ResMut<Assets<Image>>) {
+pub fn generate(mut events: EventReader<AssetEvent<Image>>, mut images: ResMut<Assets<Image>>, assets: Res<AssetServer>) {
     let ids: Vec<AssetId<Image>> = events
         .read()
         .filter_map(|e| match e {
@@ -77,6 +77,11 @@ pub fn generate(mut events: EventReader<AssetEvent<Image>>, mut images: ResMut<A
         })
         .collect();
     for id in ids {
+        // Baked lightmaps are sampled by Bevy's lightmap slab: replacing their GPU texture after the first upload (which
+        // adding mips does) can leave the slab pointing at a stale texture, so they stay single-level.
+        if assets.get_path(id).is_some_and(|p| p.path().to_string_lossy().contains("lightmap")) {
+            continue;
+        }
         let Some(image) = images.get_mut(id) else {
             continue;
         };

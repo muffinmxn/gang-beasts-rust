@@ -2567,7 +2567,9 @@ fn follow_camera(
         fov.to_degrees(),
         sim.cam_framing.group_size,
         sim.cam_framing.min_distance,
-        sim.cam_framing.max_distance,
+        // Grind's authored 200 m zoom-out lets the camera leave the room, where the unlit exterior shell and the
+        // black Void boxes show; keep it inside.
+        if sim.stage_name == "grind" { sim.cam_framing.max_distance.min(32.0) } else { sim.cam_framing.max_distance },
     );
     // Single-player framing sits a hair close; pull the authored offset out slightly (GB_CAM_ZOOM
     // overrides, 1.0 = authored). Group play keeps the authored fit so multi-player framing is

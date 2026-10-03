@@ -401,6 +401,8 @@ fn run() -> Result<(), String> {
             mips::vinyl_roughness,
             attach_stage_lightmaps,
             attach_vinyl_lightmaps,
+            lightmap_debug,
+            refresh_lightmaps,
             material_debug,
             auto_screenshot,
             manual_screenshot,
@@ -1058,6 +1060,7 @@ fn attach_stage_lightmaps(
     roots: Query<&SceneInstance, With<play::PhysicsScene>>,
     spawner: Res<SceneSpawner>,
     meshes: Res<Assets<Mesh>>,
+    images: Res<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     entities: Query<(
         Option<&GltfExtras>,
@@ -1130,6 +1133,10 @@ fn attach_stage_lightmaps(
                 checked.insert(entity);
                 continue;
             };
+            // A lightmap whose texture is still loading can be bound as a blank one and stay dark: wait for the image.
+            if images.get(image).is_none() {
+                continue;
+            }
             // Unity lightmap values are in Unity light units; Bevy wants them in its own light units
             // (its lightmap example uses ~10,000). Calibrated visually on the Aquarium: 500 left
             // it flat gray, 50,000 blew it out, 5,000 gives the warm floor of the reference.
@@ -1158,6 +1165,7 @@ fn attach_vinyl_lightmaps(
     roots: Query<&SceneInstance, With<play::PhysicsScene>>,
     spawner: Res<SceneSpawner>,
     meshes: Res<Assets<Mesh>>,
+    images: Res<Assets<Image>>,
     mut vinyl: ResMut<Assets<vinyl::VinylMaterial>>,
     entities: Query<(
         Option<&GltfExtras>,
@@ -1208,6 +1216,10 @@ fn attach_vinyl_lightmaps(
                 checked.insert(entity);
                 continue;
             };
+            // Wait for the texture (see `attach_stage_lightmaps`).
+            if images.get(image).is_none() {
+                continue;
+            }
             material.base.lightmap_exposure = *exposure * UNITY_TO_BEVY_LUMINANCE * lightmap_exposure_scale();
             let [scale_x, scale_y, offset_x, offset_y] = *scale_offset;
             commands.entity(entity).insert(Lightmap {
@@ -1627,4 +1639,93 @@ fn lightmap_exposure_scale() -> f32 {
         .and_then(|value| value.parse::<f32>().ok())
         .filter(|value| *value > 0.0)
         .unwrap_or(1.0)
+}
+
+/// Debug (`GB_LM_DEBUG=1`): once, at frame 400, count the lightmapped entities per material kind.
+fn lightmap_debug(
+    with_lightmap: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<vinyl::VinylMaterial>>), With<Lightmap>>,
+    all: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<vinyl::VinylMaterial>>), With<Mesh3d>>,
+    mut frames: Local<u32>,
+    spots: Query<(&SpotLight, &GlobalTransform)>,
+    points: Query<(&PointLight, &GlobalTransform)>,
+    suns: Query<&DirectionalLight>,
+    ambient: Option<Res<AmbientLight>>,
+    vinyl_assets: Res<Assets<vinyl::VinylMaterial>>,
+    stage_lm: Res<StageLightmaps>,
+    images: Res<Assets<Image>>,
+) {
+    if std::env::var_os("GB_LM_DEBUG").is_none() {
+        return;
+    }
+    *frames += 1;
+    if *frames == 400 {
+        let mut seen = std::collections::HashSet::new();
+        for (handle, _, _) in stage_lm.0.values() {
+            if seen.insert(handle.id()) {
+                match images.get(handle) {
+                    Some(img) => {
+                        let d = img.data.as_ref();
+                        let mean = d.map(|d| d.iter().map(|b| *b as f64).sum::<f64>() / d.len().max(1) as f64);
+                        info!("lightmap image {:?}: {}x{} mips {} format {:?} mean byte {:?}", handle.id(), img.width(), img.height(), img.texture_descriptor.mip_level_count, img.texture_descriptor.format, mean);
+                    }
+                    None => info!("lightmap image {:?}: NOT LOADED", handle.id()),
+                }
+            }
+        }
+        let mut zero = 0;
+        let mut nonzero = 0;
+        for (_, v) in with_lightmap.iter() {
+            if let Some(h) = v {
+                match vinyl_assets.get(&h.0) {
+                    Some(m) if m.base.lightmap_exposure > 0.0 => nonzero += 1,
+                    Some(_) => zero += 1,
+                    None => {}
+                }
+            }
+        }
+        info!("lightmap exposure: vinyl lightmapped with exposure>0: {nonzero}, zero: {zero}");
+    }
+    if *frames % 100 == 0 {
+        let s: Vec<String> = spots.iter().map(|(l, t)| format!("spot {:.0}@{:.0},{:.0},{:.0}", l.intensity, t.translation().x, t.translation().y, t.translation().z)).collect();
+        let p: Vec<String> = points.iter().map(|(l, t)| format!("point {:.0}@{:.0},{:.0},{:.0}", l.intensity, t.translation().x, t.translation().y, t.translation().z)).collect();
+        let d: Vec<String> = suns.iter().map(|l| format!("sun {:.0}", l.illuminance)).collect();
+        info!("lights @{}: {:?} {:?} {:?} ambient {:?}", *frames, s, p, d, ambient.map(|a| a.brightness));
+    }
+    if *frames == 400 {
+        let lm_std = with_lightmap.iter().filter(|(s, _)| s.is_some()).count();
+        let lm_vin = with_lightmap.iter().filter(|(_, v)| v.is_some()).count();
+        let all_std = all.iter().filter(|(s, _)| s.is_some()).count();
+        let all_vin = all.iter().filter(|(_, v)| v.is_some()).count();
+        info!("lightmap debug: lightmapped std {lm_std} vinyl {lm_vin}; meshes std {all_std} vinyl {all_vin}");
+    }
+}
+
+/// Re-inserts every `Lightmap` and its material handle a couple of times after load. Some runs rendered the baked GI as if
+/// it were absent (walls, pipes and ceilings dark) although the component and its exposure were set: when the lightmap
+/// arrives after the mesh was first specialised without it, Bevy does not re-specialise the pipeline. Re-inserting the
+/// material handle forces that. `GB_NO_LM_REFRESH=1` disables (A/B).
+fn refresh_lightmaps(
+    mut commands: Commands,
+    lightmapped: Query<(
+        Entity,
+        &Lightmap,
+        Option<&MeshMaterial3d<StandardMaterial>>,
+        Option<&MeshMaterial3d<vinyl::VinylMaterial>>,
+    )>,
+    mut frames: Local<u32>,
+) {
+    *frames += 1;
+    if !matches!(*frames, 90 | 240 | 600) || std::env::var_os("GB_NO_LM_REFRESH").is_some() {
+        return;
+    }
+    for (entity, lightmap, standard, vinyl) in &lightmapped {
+        let mut e = commands.entity(entity);
+        e.insert(lightmap.clone());
+        if let Some(m) = standard {
+            e.insert(m.clone());
+        }
+        if let Some(m) = vinyl {
+            e.insert(m.clone());
+        }
+    }
 }
