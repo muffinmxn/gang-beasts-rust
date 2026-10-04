@@ -307,6 +307,11 @@ impl Sim {
         self.beast_src.nodes[node].name()
     }
 
+    /// World poses of the stage scene nodes (Unity space).
+    pub fn stage_poses(&self) -> Vec<gb_phys::Pose> {
+        self.scenes[0].1.world_poses(gb_phys::Pose::IDENTITY)
+    }
+
     /// The beast sidecar (for `RemoveUnseenMesh`: rest-pose bone positions).
     pub fn beast_sidecar(&self) -> &Sidecar {
         &self.beast_src

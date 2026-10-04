@@ -90,6 +90,30 @@ struct SfxVoice;
 #[derive(Component)]
 pub struct MusicVoice(pub f32);
 
+/// A stage loop (`SceneAudioClip` with `play2D` off) that sits at its scene node and fades with the listener's distance.
+#[derive(Component)]
+pub struct PositionalLoop {
+    pos: Vec3,
+    min: f32,
+    max: f32,
+}
+
+impl PositionalLoop {
+    /// Unity's roll-off is relative to the audio listener on the camera, which sits well back from the action here, so the
+    /// authored distances are stretched to keep nearby machinery audible.
+    fn gain(&self, listener: Vec3) -> f32 {
+        let (min, max) = (self.min * 2.5, self.max * 2.5 + 8.0);
+        let d = (self.pos - listener).length();
+        if d <= min {
+            1.0
+        } else if d >= max {
+            0.0
+        } else {
+            (min / d) * (1.0 - ((d - min) / (max - min)).powi(2))
+        }
+    }
+}
+
 pub fn plugin(app: &mut App, root: &Path) {
     let index: HashMap<String, serde_json::Value> = std::fs::read(root.join("audio-index.json"))
         .ok()
@@ -142,9 +166,10 @@ fn sync_volume(menu: Option<Res<crate::menu::Menu>>, mut sfx: ResMut<Sfx>) {
 }
 
 /// Re-applies the mix to the music voices that are already playing.
-fn retune_music(sfx: Res<Sfx>, mut voices: Query<(&MusicVoice, &mut AudioSink)>) {
-    for (v, mut sink) in &mut voices {
-        sink.set_volume(Volume::Linear(v.0 * sfx.master * sfx.music_gain));
+fn retune_music(sfx: Res<Sfx>, mut voices: Query<(&MusicVoice, &mut AudioSink, Option<&PositionalLoop>)>) {
+    for (v, mut sink, positional) in &mut voices {
+        let near = positional.map_or(1.0, |p| p.gain(sfx.listener));
+        sink.set_volume(Volume::Linear(v.0 * near * sfx.master * sfx.music_gain));
     }
 }
 
@@ -236,6 +261,8 @@ fn music(
     }
     // (clip, volume)
     let mut layers: Vec<(String, f32)> = Vec::new();
+    // Positional loops: (clip, volume, position, min, max).
+    let mut spots: Vec<(String, f32, Vec3, f32, f32)> = Vec::new();
     let key;
     if menu.is_some() {
         key = "menu".to_string();
@@ -248,6 +275,7 @@ fn music(
         let drums = alive <= 2 && sim.actors.len() > 2;
         key = format!("{}:{}:{}", sim.stage_name, b_side, drums);
         let stage = sim.stage_name.clone();
+        let poses = sim.stage_poses();
         if let Ok(b) = std::fs::read(lib.root.join(format!("audio-{stage}.json"))) {
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
                 if let Some(music) = v["music"].as_object().and_then(|m| m.values().next()) {
@@ -264,9 +292,14 @@ fn music(
                 let mut seen = std::collections::HashSet::new();
                 for c in v["clips"].as_array().into_iter().flatten() {
                     let (Some(clip), true) = (c["ptrs"]["clip"].as_str(), c["loop"].as_i64() == Some(1)) else { continue };
-                    if seen.insert(clip.to_string()) {
-                        let vol = c["volume"].as_f64().unwrap_or(0.3) as f32;
-                        layers.push((clip.to_string(), (vol * 0.8).clamp(0.05, 0.6)));
+                    let vol = (c["volume"].as_f64().unwrap_or(0.3) as f32 * 0.8).clamp(0.05, 0.6);
+                    let node = c["go"].as_u64().map(|n| n as usize);
+                    let at = node.and_then(|n| poses.get(n)).map(|p| gb_phys::source::mirror_position(p.position));
+                    if c["play2D"].as_i64() == Some(0) && at.is_some() {
+                        // One voice per node: a stage can carry several emitters of the same clip.
+                        spots.push((clip.to_string(), vol, at.unwrap(), c["minDistance"].as_f64().unwrap_or(4.0) as f32, c["maxDistance"].as_f64().unwrap_or(20.0) as f32));
+                    } else if seen.insert(clip.to_string()) {
+                        layers.push((clip.to_string(), vol));
                     }
                 }
             }
@@ -280,6 +313,17 @@ fn music(
     *current = key;
     for e in &existing {
         commands.entity(e).despawn();
+    }
+    for (clip, volume, pos, min, max) in spots.into_iter().take(24) {
+        if let Some(file) = lib.files.get(&clip) {
+            let volume = volume * lib.level(&clip, 0.10);
+            commands.spawn((
+                MusicVoice(volume),
+                PositionalLoop { pos, min, max },
+                AudioPlayer::<AudioSource>(assets.load(format!("audio/{file}"))),
+                PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0)),
+            ));
+        }
     }
     for (clip, volume) in layers {
         if let Some(file) = lib.files.get(&clip) {

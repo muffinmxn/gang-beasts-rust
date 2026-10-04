@@ -94,7 +94,7 @@ See the "Audio" section in `README.md` for extraction. Status of each part is tr
 - [ ] Verify real playback on a machine with an audio device (developed headless: the clip selection is logged with
   `GB_AUDIO_DEBUG=1`, loudness values are estimates).
 - [~] Music: A/B side per round and drums when two or fewer fight are in. Missing: warp stingers, crossfades, round-flow transitions (`MusicController`), pause music.
-- [ ] Positional (3D) sources for ambient loops, doppler, mixer groups and snapshots from the AudioMixer assets.
+- [~] Stage loops (`SceneAudioClip` with play2D off) sit at their scene node and fade with the camera distance. Missing: moving emitters (trains), doppler, mixer groups and snapshots from the AudioMixer assets.
 - [ ] Voices: emotes, laughs, snore loop; tentacles, trawler groans, bulb pops, train / crane / elevator / wheel loops,
   countdown voice (`AudioDatabase`), `SoundOnTriggerEnter` / `PlaySoundOnJointBreak` stage sounds.
 - [ ] Convert the WAVs to Ogg to shrink the 2.6 GB extraction.
