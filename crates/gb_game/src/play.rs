@@ -1871,7 +1871,13 @@ fn map_nodes(
                 let mut cur = Some(e);
                 for _ in 0..4 {
                     let Some(c) = cur else { break };
-                    if names.get(c).is_ok_and(|n| matches!(n.as_str(), "grind_pipesLeft (1)" | "grind_pipesRight (1)")) {
+                    // LODGroup renderers: Unity shows one level by distance; drawing every level at once overlaps them
+                    // (z-fighting on the Elevators / Gondola frames). Only LOD0 is drawn.
+                    if names.get(c).is_ok_and(|n| {
+                        matches!(n.as_str(), "grind_pipesLeft (1)" | "grind_pipesRight (1)")
+                            || n.as_str().contains("_LOD1")
+                            || n.as_str().contains("_LOD2")
+                    }) {
                         commands.entity(e).insert(Visibility::Hidden);
                         break;
                     }
