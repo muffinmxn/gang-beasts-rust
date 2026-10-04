@@ -94,6 +94,8 @@ pub struct Menu {
     item_keys: HashMap<usize, String>,
     root: PathBuf,
     /// Audio settings, 0..=10 steps (master / music / effects). Persisted in the lobby prefs file.
+    /// Controls screen: the action whose key is being captured.
+    rebinding: Option<usize>,
     pub vol_master: u32,
     pub vol_music: u32,
     pub vol_sfx: u32,
@@ -781,12 +783,12 @@ fn setup(
     screens.insert(AUDIO, option_screen(settings_camera, &[
         ("", "Audio"), ("SETTINGS_AUDIO_MASTER", "Master"), ("SETTINGS_AUDIO_MUSIC", "Music"),
         ("SETTINGS_AUDIO_SFX", "Effects"), ("BACK_SETTINGS", "Back")], &mut item_keys));
-    screens.insert(CONTROLS, option_screen(settings_camera, &[
-        ("", "Controls"), ("", "WASD / arrows: move"),
-        ("", "Space: jump   Shift: lift"), ("", "C / Ctrl: duck   F: kick"),
-        ("", "Mouse buttons: punch / hold to grab"),
-        ("", "Controller: left stick + face / shoulder buttons"),
-        ("BACK_SETTINGS", "Back")], &mut item_keys));
+    screens.insert(CONTROLS, option_screen_spaced(settings_camera, &[
+        ("", "Controls"), ("SETTINGS_KEY_0", "Up"), ("SETTINGS_KEY_1", "Down"), ("SETTINGS_KEY_2", "Left"),
+        ("SETTINGS_KEY_3", "Right"), ("SETTINGS_KEY_4", "Jump"), ("SETTINGS_KEY_5", "Duck"),
+        ("SETTINGS_KEY_6", "Kick"), ("SETTINGS_KEY_7", "Lift"), ("SETTINGS_KEY_RESET", "Reset to defaults"),
+        ("", "Arrows + Ctrl also work"),
+        ("BACK_SETTINGS", "Back")], &mut item_keys, 340.0, 56.0, 34.0));
     let main_camera = screens.get(MAIN).map_or(Transform::IDENTITY, |s| s.camera);
     screens.insert(CREDITS, option_screen(main_camera, &[
         ("", "Gang Beasts"), ("", "Original game by Boneloaf"),
@@ -856,6 +858,7 @@ fn setup(
         .min(palette_len.saturating_sub(1)),
         item_keys,
         root: root.0.clone(),
+        rebinding: None,
         vol_master: prefs["vol_master"].as_u64().map_or(DEFAULT_VOL.0, |v| v.min(10) as u32),
         vol_music: prefs["vol_music"].as_u64().map_or(DEFAULT_VOL.1, |v| v.min(10) as u32),
         vol_sfx: prefs["vol_sfx"].as_u64().map_or(DEFAULT_VOL.2, |v| v.min(10) as u32),
@@ -1509,6 +1512,18 @@ fn input(
         back &= !lobby_back_used && menu.joined == 0;
     }
     let menu = &mut *menu;
+    // Rebinding: the next key press becomes the binding (Escape cancels) and is consumed here.
+    if let Some(action) = menu.rebinding {
+        if let Some(k) = keys.get_just_pressed().next().copied() {
+            if k != KeyCode::Escape && crate::binds::bindable(k) {
+                crate::binds::set(action, k);
+                save_prefs_keys();
+            }
+            menu.rebinding = None;
+            menu.dirty = true;
+        }
+        return;
+    }
     for (label, interaction) in &pointers {
         if !matches!(interaction, Interaction::Hovered | Interaction::Pressed) { continue; }
         if let Some(item) = menu.screens.get(menu.current)
@@ -1552,6 +1567,17 @@ fn input(
         .and_then(|s| menu.item_keys.get(&s))
         .cloned()
         .unwrap_or_default();
+    if ok && menu.current == CONTROLS {
+        if let Some(n) = key.strip_prefix("SETTINGS_KEY_") {
+            if n == "RESET" {
+                crate::binds::reset();
+                save_prefs_keys();
+            } else if let Ok(i) = n.parse::<usize>() {
+                menu.rebinding = Some(i);
+            }
+            menu.dirty = true;
+        }
+    }
     if (left || right) && key == "MENU_WINS" {
         menu.wins = if right {
             menu.wins % 10 + 1
@@ -2074,6 +2100,11 @@ fn layout(
                     .map(|s| stage_label(s))
                     .unwrap_or_else(|| "Random".to_string()),
             ),
+            Some(k) if k.starts_with("SETTINGS_KEY_") && k != "SETTINGS_KEY_RESET" => {
+                let i: usize = k["SETTINGS_KEY_".len()..].parse().unwrap_or(0).min(7);
+                let value = if menu.rebinding == Some(i) { "press a key...".to_string() } else { crate::binds::name(crate::binds::get()[i]).to_string() };
+                Some(format!("{}: {}", crate::binds::ACTIONS[i], value))
+            }
             Some("SETTINGS_AUDIO_MASTER") => Some(format!("Master: {}%", menu.vol_master * 10)),
             Some("SETTINGS_AUDIO_MUSIC") => Some(format!("Music: {}%", menu.vol_music * 10)),
             Some("SETTINGS_AUDIO_SFX") => Some(format!("Effects: {}%", menu.vol_sfx * 10)),
@@ -2212,6 +2243,15 @@ fn save_custom_costume(items: &[(u16, u32)]) {
         value = serde_json::json!({});
     }
     value["custom_costume"] = items.iter().map(|(u, c)| serde_json::json!([u, c])).collect::<Vec<_>>().into();
+    write_prefs(&value);
+}
+
+fn save_prefs_keys() {
+    let mut value = load_prefs();
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["keys"] = crate::binds::to_prefs();
     write_prefs(&value);
 }
 

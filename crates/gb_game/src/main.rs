@@ -1,5 +1,6 @@
 //! Asset viewer and headless validation for the Gang Beasts Rust reimplementation.
 mod audio;
+mod binds;
 mod costume;
 mod unseen;
 mod devgui;
@@ -37,6 +38,7 @@ use std::{
 };
 
 fn main() {
+    binds::load(&menu::load_prefs());
     if let Err(error) = run() {
         eprintln!("Gang Beasts asset error: {error}");
         std::process::exit(1);

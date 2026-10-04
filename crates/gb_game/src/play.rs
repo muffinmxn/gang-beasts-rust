@@ -779,22 +779,16 @@ struct Raw {
 
 fn kbm_raw(keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>) -> Raw {
     let held = |k: &[KeyCode]| k.iter().any(|k| keys.pressed(*k));
+    // up, down, left, right, jump, duck, kick, lift (rebindable on the Controls screen).
+    let [up, down, left, right, jump, duck, kick, lift] = crate::binds::get();
     Raw {
-        h: axis(
-            keys,
-            &[KeyCode::KeyA, KeyCode::ArrowLeft],
-            &[KeyCode::KeyD, KeyCode::ArrowRight],
-        ),
-        v: axis(
-            keys,
-            &[KeyCode::KeyS, KeyCode::ArrowDown],
-            &[KeyCode::KeyW, KeyCode::ArrowUp],
-        ),
+        h: axis(keys, &[left, KeyCode::ArrowLeft], &[right, KeyCode::ArrowRight]),
+        v: axis(keys, &[down, KeyCode::ArrowDown], &[up, KeyCode::ArrowUp]),
         buttons: [
-            held(&[KeyCode::Space]),
-            held(&[KeyCode::ControlLeft, KeyCode::KeyC]),
-            held(&[KeyCode::KeyF]),
-            held(&[KeyCode::ShiftLeft]),
+            held(&[jump]),
+            held(&[KeyCode::ControlLeft, duck]),
+            held(&[kick]),
+            held(&[lift]),
             mouse.pressed(MouseButton::Left),
             mouse.pressed(MouseButton::Right),
         ],

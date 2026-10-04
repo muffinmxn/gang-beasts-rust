@@ -80,7 +80,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 
 - [x] Lobby (mode/stage/wins/AI/colour, remembered between runs), loading screen, round banner and coinboard.
 - [ ] In-match HUD parity: name bars, timers, key prompts (needs real captures to match).
-- [~] Settings: graphics and audio (master / music / effects) are wired; controls rebinding is not.
+- [~] Settings: graphics, audio and keyboard rebinding (Controls screen, saved in prefs) are wired; controller rebinding is not.
 - [ ] Save / progression / unlockables.
 
 ## Audio (`crates/gb_game/src/audio.rs`)
