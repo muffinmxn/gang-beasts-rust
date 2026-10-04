@@ -2758,8 +2758,8 @@ fn camera_offset(
     let needed = (spread + 1.0) / (group_size * (fov_degrees.to_radians() * 0.5).tan());
     let distance = anchor.length().max(needed).clamp(minimum, maximum);
     let mut height = anchor.y.clamp(3.0, distance - 0.5);
-    // The orbit offset gives the camera elevation (GB_CAM_NO_ELEV=1 restores the old flat height): raise the camera to the orbit offset's elevation angle.
-    if std::env::var_os("GB_CAM_NO_ELEV").is_none() {
+    // The orbit offset gives the camera elevation (off by default, GB_CAM_ELEV=1 enables it; it looked too high in play): raise the camera to the orbit offset's elevation angle.
+    if std::env::var_os("GB_CAM_ELEV").is_some() {
         let flat = Vec2::new(orbit_offset.x, orbit_offset.z).length().max(0.1);
         let elev = orbit_offset.y.atan2(flat);
         height = height.max(distance * elev.sin()).min(distance - 0.5);
