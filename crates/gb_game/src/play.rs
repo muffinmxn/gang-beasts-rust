@@ -960,6 +960,15 @@ fn auto_raw(sim: &Sim) -> Option<Raw> {
 /// fighter, wave 2 riot police, the rest wear the fallback costumes. Surviving every wave wins the match.
 /// (costume, beast type): type 0 normal, 1 Big (`beastTypePref[1]`), 2 Tiny. Wave 2 is a normal and a Big riot cop.
 const WAVES: [&[(&str, u8)]; 4] = [&[("Firefighter_01", 0)], &[("Riot", 0), ("Riot", 1)], &[("", 0), ("", 0), ("", 2)], &[("", 0), ("", 1), ("", 2), ("", 2)]];
+/// The four authored waves, then an endless escalation (one more beast per wave up to eight, a mix of normal, Big
+/// and Tiny) so the run lasts until the humans go down and "waves survived" is the score.
+fn wave_roster(done: usize) -> Vec<(&'static str, u8)> {
+    if let Some(w) = WAVES.get(done) {
+        return w.to_vec();
+    }
+    let count = (done + 1).min(8);
+    (0..count).map(|i| ("", match i % 4 { 2 => 2, 3 => 1, _ => 0 })).collect()
+}
 const WAVE_FALLBACK_COSTUMES: [&str; 6] = ["OfficeShort", "OfficeLong_2", "BusinessSuit", "TIE", "Riot", "Firefighter_01"];
 
 /// Enemy entrances: every stage node under a "Waves" spawn group (`GBGangSpawnPoint` under `Spawns/WavesSpawnPoint`,
@@ -1118,13 +1127,8 @@ fn waves(sim: &mut Sim) {
             }
         }
         let done = sim.round.wave as usize;
-        if done >= WAVES.len() {
-            sim.round.game_over = true;
-            sim.round.message = Some(crate::round::Message { text: "All Waves Defeated!".into(), color: Color::WHITE, age: 0.0 });
-            info!("waves: all {} waves defeated", WAVES.len());
-            return;
-        }
-        let wave = WAVES[done];
+        let wave = wave_roster(done);
+        let wave = wave.as_slice();
         let mut wave_used: Vec<usize> = Vec::new();
         sim.round.wave += 1;
         sim.wave_clock = 0.0;
@@ -3097,11 +3101,8 @@ fn waves_to_menu(
     }
     if *shown == 0.0 {
         // Waves survived: all four when cleared, otherwise the waves before the one that beat us.
-        let survived = if sim.round.wave as usize >= WAVES.len() && sim.round.message.as_ref().is_some_and(|m| m.text.contains("Defeated")) {
-            WAVES.len() as u32
-        } else {
-            sim.round.wave.saturating_sub(1)
-        };
+        // Endless: the wave that beat us does not count.
+        let survived = sim.round.wave.saturating_sub(1);
         let previous = crate::menu::load_prefs()["waves_best"].as_u64().unwrap_or(0) as u32;
         let best = crate::menu::record_waves(survived);
         if let Some(m) = sim.round.message.as_mut() {

@@ -100,7 +100,7 @@ tools/harness    optional screenshot / comparison helpers
 
 - 20 playable stages (Rooftop, Subway, Grind, Incinerator, Billboard, Blimp, Buoy, Containers, Crane, Elevators, Girders,
   Gondola, Lighthouse, Ring, Towers, Train, Trawler, Trucks, Vents, Ferris Wheel) plus Alley for Soccer.
-- Modes: Melee, Gang (teams), Waves (the game's four waves with normal, Big and Tiny beasts, enemies come out of the stage
+- Modes: Melee, Gang (teams), Waves (the game's four waves, then endless escalation, with normal, Big and Tiny beasts; enemies come out of the stage
   door) and Soccer (Alley). Local AI opponents (`B` / `Shift+B` in the lobby), up to 8 fighters on one machine with
   keyboard and gamepads.
 - Ragdoll beasts on PhysX with the game's movement, grab, punch, lift and damage rules; costumes with per-player colours;

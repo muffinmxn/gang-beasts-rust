@@ -23,7 +23,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 - **Melee** (free for all), **Gang** (two balanced teams, shared colour): round flow Playing -> Settle -> Winner zoom ->
   End of round (coinboard with balloons) -> Loading, wins to win configurable (1-10).
 - **Waves**: the game's `WavesData` (four waves: 1 firefighter, 2 riot police incl. a Big one, then fallback costumes).
-  Waves 3 and 4 add Tiny and Big enemies (not in the retail data). Local players are red. Enemies spawn in the room behind
+  Waves 3 and 4 add Tiny and Big enemies (not in the retail data); after wave 4 the run is endless (one more beast per wave up to eight, mixed types) and the score is the waves survived. Local players are red. Enemies spawn in the room behind
   the stage door and walk out; humans are pushed out of the room; losing (or clearing wave 4) shows the result and returns
   to the menu; the best run is remembered. Offered on Rooftop, Subway, Grind and Incinerator only.
 - **Soccer** (Alley): ball, goals, score HUD, kick-off reset, wedged-ball reset. Bots chase the ball but rarely score.
