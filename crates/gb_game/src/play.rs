@@ -938,6 +938,10 @@ fn auto_raw(sim: &Sim) -> Option<Raw> {
             "duck" => raw.buttons[1] = true,
             "kick" => raw.buttons[2] = cycle,
             "lift" => raw.buttons[3] = true,
+            "grab" => {
+                raw.buttons[4] = true;
+                raw.buttons[5] = true;
+            }
             "punch" => {
                 raw.buttons[4] = cycle;
                 raw.buttons[5] = cycle;
@@ -1540,6 +1544,13 @@ fn simulate(
             let next = sim.pads.len();
             let target = *sim.pads.entry(e).or_insert(next % n);
             add(target, pad_raw(g));
+        }
+        // Debug: GB_GRAB_TEST=1 stands actor 1 in front of actor 0 at step 100 so a scripted grab / lift can be checked.
+        if std::env::var_os("GB_GRAB_TEST").is_some() && sim.world.steps == 100 && sim.actors.len() > 1 {
+            let mut at = sim.actor_spawn[0];
+            at.position += at.rotation * Vec3::new(0.0, 0.0, 0.9);
+            sim.actor_spawn[1] = at;
+            sim.respawn(1);
         }
         // Scripted input for captures (see auto_raw): the keyboard actor walks/punches on a
         // fixed cycle, so a snag can be reproduced without a human at the keyboard.

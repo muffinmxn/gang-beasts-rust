@@ -17,6 +17,8 @@ pub struct Sfx {
     queue: Vec<SfxCall>,
     /// Last play time per clip family, to stop a pile-up of identical sounds in one frame.
     last: HashMap<String, f32>,
+    /// Requested clips that are not in the extraction (logged once each).
+    missing: std::collections::HashSet<String>,
     /// Where the listener (camera) is, for distance attenuation of positional sounds.
     pub listener: Vec3,
     pub master: f32,
@@ -89,6 +91,11 @@ struct SfxVoice;
 
 #[derive(Component)]
 pub struct MusicVoice(pub f32);
+
+/// Identity of a music / loop voice, so a change of the music mix only adds or removes the layers that differ
+/// (restarting every layer on each change made the beds cut out and repeat).
+#[derive(Component)]
+pub struct MusicLayer(String);
 
 /// A stage loop (`SceneAudioClip` with `play2D` off) that sits at its scene node and fades with the listener's distance.
 #[derive(Component)]
@@ -191,7 +198,13 @@ fn drain(
     let mut live = voices.iter().count();
     let now = time.elapsed_secs();
     for c in calls {
-        let Some(file) = lib.files.get(&c.clip) else { continue };
+        let Some(file) = lib.files.get(&c.clip) else {
+            // A requested clip with no extracted file: say so once instead of staying silent.
+            if sfx.missing.insert(c.clip.clone()) {
+                warn!("audio: no clip named '{}' in the extraction", c.clip);
+            }
+            continue;
+        };
         if live >= 40 {
             break;
         }
@@ -213,7 +226,7 @@ fn drain(
         commands.spawn((
             SfxVoice,
             AudioPlayer::<AudioSource>(assets.load(format!("audio/{file}"))),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume.min(2.0))).with_speed(c.speed.clamp(0.25, 4.0)),
+            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume.min(1.0))).with_speed(c.speed.clamp(0.25, 4.0)),
         ));
         live += 1;
     }
@@ -252,7 +265,7 @@ fn music(
     assets: Res<AssetServer>,
     sim: Option<NonSend<crate::play::Sim>>,
     menu: Option<Res<crate::menu::Menu>>,
-    existing: Query<Entity, With<MusicVoice>>,
+    existing: Query<(Entity, &MusicLayer)>,
     mut current: Local<String>,
     sfx: Res<Sfx>,
 ) {
@@ -274,6 +287,9 @@ fn music(
         let b_side = rounds % 2 == 1;
         let drums = alive <= 2 && sim.actors.len() > 2;
         key = format!("{}:{}:{}", sim.stage_name, b_side, drums);
+        if *current == key {
+            return;
+        }
         let stage = sim.stage_name.clone();
         let poses = sim.stage_poses();
         if let Ok(b) = std::fs::read(lib.root.join(format!("audio-{stage}.json"))) {
@@ -311,13 +327,25 @@ fn music(
         return;
     }
     *current = key;
-    for e in &existing {
-        commands.entity(e).despawn();
+    // Keep the voices that are still wanted (same id); drop the rest and start only the new ones.
+    let spots: Vec<_> = spots.into_iter().take(24).enumerate().map(|(i, (clip, v, p, a, b))| (format!("{clip}@{i}"), clip, v, p, a, b)).collect();
+    let wanted: std::collections::HashSet<String> = spots.iter().map(|s| s.0.clone()).chain(layers.iter().map(|l| l.0.clone())).collect();
+    let mut present = std::collections::HashSet::new();
+    for (e, layer) in &existing {
+        if wanted.contains(&layer.0) {
+            present.insert(layer.0.clone());
+        } else {
+            commands.entity(e).despawn();
+        }
     }
-    for (clip, volume, pos, min, max) in spots.into_iter().take(24) {
+    for (id, clip, volume, pos, min, max) in spots {
+        if present.contains(&id) {
+            continue;
+        }
         if let Some(file) = lib.files.get(&clip) {
             let volume = volume * lib.level(&clip, 0.10);
             commands.spawn((
+                MusicLayer(id),
                 MusicVoice(volume),
                 PositionalLoop { pos, min, max },
                 AudioPlayer::<AudioSource>(assets.load(format!("audio/{file}"))),
@@ -326,9 +354,13 @@ fn music(
         }
     }
     for (clip, volume) in layers {
+        if present.contains(&clip) {
+            continue;
+        }
         if let Some(file) = lib.files.get(&clip) {
             let volume = volume * lib.level(&clip, 0.10);
             commands.spawn((
+                MusicLayer(clip.clone()),
                 MusicVoice(volume),
                 AudioPlayer::<AudioSource>(assets.load(format!("audio/{file}"))),
                 PlaybackSettings::LOOP.with_volume(Volume::Linear(volume * sfx.master * sfx.music_gain)),
