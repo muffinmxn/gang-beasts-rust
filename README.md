@@ -123,7 +123,7 @@ tools/harness    optional screenshot / comparison helpers
   the swimming stroke animation.
 - Exact per-stage lighting and colour parity (compare each stage with a retail capture), water depth colour fade and
   refraction, particles.
-- In-match HUD parity (name bars, key prompts), controller rebinding, progression and unlockables.
+- In-match HUD parity (name bars, key prompts), progression and unlockables.
 - Audio polish: moving emitters, mixer snapshots, many stage-specific loops.
 
 The full, detailed feature list with every known bug is in [`docs/FEATURES.md`](docs/FEATURES.md); the working to-do list for

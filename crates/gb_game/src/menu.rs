@@ -786,9 +786,11 @@ fn setup(
     screens.insert(CONTROLS, option_screen_spaced(settings_camera, &[
         ("", "Controls"), ("SETTINGS_KEY_0", "Up"), ("SETTINGS_KEY_1", "Down"), ("SETTINGS_KEY_2", "Left"),
         ("SETTINGS_KEY_3", "Right"), ("SETTINGS_KEY_4", "Jump"), ("SETTINGS_KEY_5", "Duck"),
-        ("SETTINGS_KEY_6", "Kick"), ("SETTINGS_KEY_7", "Lift"), ("SETTINGS_KEY_RESET", "Reset to defaults"),
-        ("", "Arrows + Ctrl also work"),
-        ("BACK_SETTINGS", "Back")], &mut item_keys, 340.0, 56.0, 34.0));
+        ("SETTINGS_KEY_6", "Kick"), ("SETTINGS_KEY_7", "Lift"),
+        ("SETTINGS_KEY_8", "Pad Jump"), ("SETTINGS_KEY_9", "Pad Duck"), ("SETTINGS_KEY_10", "Pad Kick"),
+        ("SETTINGS_KEY_11", "Pad Lift"), ("SETTINGS_KEY_12", "Pad Left hand"), ("SETTINGS_KEY_13", "Pad Right hand"),
+        ("SETTINGS_KEY_RESET", "Reset to defaults"),
+        ("BACK_SETTINGS", "Back")], &mut item_keys, 340.0, 38.0, 28.0));
     let main_camera = screens.get(MAIN).map_or(Transform::IDENTITY, |s| s.camera);
     screens.insert(CREDITS, option_screen(main_camera, &[
         ("", "Gang Beasts"), ("", "Original game by Boneloaf"),
@@ -1514,11 +1516,21 @@ fn input(
     let menu = &mut *menu;
     // Rebinding: the next key press becomes the binding (Escape cancels) and is consumed here.
     if let Some(action) = menu.rebinding {
-        if let Some(k) = keys.get_just_pressed().next().copied() {
-            if k != KeyCode::Escape && crate::binds::bindable(k) {
-                crate::binds::set(action, k);
-                save_prefs_keys();
+        if keys.just_pressed(KeyCode::Escape) {
+            menu.rebinding = None;
+            menu.dirty = true;
+        } else if action < 8 {
+            if let Some(k) = keys.get_just_pressed().next().copied() {
+                if crate::binds::bindable(k) {
+                    crate::binds::set(action, k);
+                    save_prefs_keys();
+                }
+                menu.rebinding = None;
+                menu.dirty = true;
             }
+        } else if let Some(b) = pads.iter().find_map(|g| g.get_just_pressed().find(|b| crate::binds::pad_bindable(**b)).copied()) {
+            crate::binds::pad_set(action - 8, b);
+            save_prefs_keys();
             menu.rebinding = None;
             menu.dirty = true;
         }
@@ -2101,9 +2113,14 @@ fn layout(
                     .unwrap_or_else(|| "Random".to_string()),
             ),
             Some(k) if k.starts_with("SETTINGS_KEY_") && k != "SETTINGS_KEY_RESET" => {
-                let i: usize = k["SETTINGS_KEY_".len()..].parse().unwrap_or(0).min(7);
-                let value = if menu.rebinding == Some(i) { "press a key...".to_string() } else { crate::binds::name(crate::binds::get()[i]).to_string() };
-                Some(format!("{}: {}", crate::binds::ACTIONS[i], value))
+                let i: usize = k["SETTINGS_KEY_".len()..].parse().unwrap_or(0).min(13);
+                if i < 8 {
+                    let value = if menu.rebinding == Some(i) { "press a key...".to_string() } else { crate::binds::name(crate::binds::get()[i]).to_string() };
+                    Some(format!("{}: {}", crate::binds::ACTIONS[i], value))
+                } else {
+                    let value = if menu.rebinding == Some(i) { "press a button...".to_string() } else { crate::binds::pad_name(crate::binds::pad_get()[i - 8]).to_string() };
+                    Some(format!("Pad {}: {}", crate::binds::PAD_ACTIONS[i - 8], value))
+                }
             }
             Some("SETTINGS_AUDIO_MASTER") => Some(format!("Master: {}%", menu.vol_master * 10)),
             Some("SETTINGS_AUDIO_MUSIC") => Some(format!("Music: {}%", menu.vol_music * 10)),
@@ -2252,6 +2269,7 @@ fn save_prefs_keys() {
         value = serde_json::json!({});
     }
     value["keys"] = crate::binds::to_prefs();
+    value["pad"] = crate::binds::pad_to_prefs();
     write_prefs(&value);
 }
 

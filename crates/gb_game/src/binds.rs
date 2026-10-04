@@ -1,7 +1,7 @@
 //! Rebindable keyboard controls. The arrow keys (and Ctrl for duck) stay as fixed secondary keys; the primary keys below
 //! can be changed on the Controls screen and are stored in the lobby prefs file as key names.
 
-use bevy::prelude::KeyCode;
+use bevy::prelude::{GamepadButton, KeyCode};
 use std::sync::Mutex;
 
 /// Order matches [`ACTIONS`].
@@ -32,6 +32,48 @@ pub fn set(action: usize, key: KeyCode) {
 
 pub fn reset() {
     *KEYS.lock().unwrap() = DEFAULTS;
+    *PAD.lock().unwrap() = PAD_DEFAULTS;
+}
+
+/// Gamepad actions in the order of `Raw::buttons`.
+pub const PAD_ACTIONS: [&str; 6] = ["Jump", "Duck", "Kick", "Lift", "Left hand", "Right hand"];
+
+pub const PAD_DEFAULTS: [GamepadButton; 6] = [
+    GamepadButton::South,
+    GamepadButton::East,
+    GamepadButton::West,
+    GamepadButton::North,
+    GamepadButton::LeftTrigger,
+    GamepadButton::RightTrigger,
+];
+
+static PAD: Mutex<[GamepadButton; 6]> = Mutex::new(PAD_DEFAULTS);
+
+pub fn pad_get() -> [GamepadButton; 6] {
+    *PAD.lock().unwrap()
+}
+
+pub fn pad_set(action: usize, button: GamepadButton) {
+    if let Some(slot) = PAD.lock().unwrap().get_mut(action) {
+        *slot = button;
+    }
+}
+
+const PAD_TABLE: &[(GamepadButton, &str)] = &[
+    (GamepadButton::South, "A"), (GamepadButton::East, "B"), (GamepadButton::West, "X"), (GamepadButton::North, "Y"),
+    (GamepadButton::LeftTrigger, "LB"), (GamepadButton::RightTrigger, "RB"),
+    (GamepadButton::LeftTrigger2, "LT"), (GamepadButton::RightTrigger2, "RT"),
+    (GamepadButton::LeftThumb, "L3"), (GamepadButton::RightThumb, "R3"),
+    (GamepadButton::DPadUp, "D-pad Up"), (GamepadButton::DPadDown, "D-pad Down"),
+    (GamepadButton::DPadLeft, "D-pad Left"), (GamepadButton::DPadRight, "D-pad Right"),
+];
+
+pub fn pad_name(b: GamepadButton) -> &'static str {
+    PAD_TABLE.iter().find(|(k, _)| *k == b).map_or("?", |(_, n)| n)
+}
+
+pub fn pad_bindable(b: GamepadButton) -> bool {
+    PAD_TABLE.iter().any(|(k, _)| *k == b)
 }
 
 /// Every key a player can pick, with its display name.
@@ -76,6 +118,22 @@ pub fn load(prefs: &serde_json::Value) {
             }
         }
     }
+    for (i, action) in PAD_ACTIONS.iter().enumerate() {
+        if let Some(n) = prefs["pad"][*action].as_str() {
+            if let Some((b, _)) = PAD_TABLE.iter().find(|(_, name)| *name == n) {
+                pad_set(i, *b);
+            }
+        }
+    }
+}
+
+pub fn pad_to_prefs() -> serde_json::Value {
+    let pad = pad_get();
+    let mut map = serde_json::Map::new();
+    for (i, action) in PAD_ACTIONS.iter().enumerate() {
+        map.insert((*action).into(), pad_name(pad[i]).into());
+    }
+    serde_json::Value::Object(map)
 }
 
 pub fn to_prefs() -> serde_json::Value {

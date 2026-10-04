@@ -78,7 +78,7 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
   for Waves, stages filtered by mode), AI count, colour and costume keys, remembered choices
   (`%APPDATA%/gb-rust/lobby.json`), loading splash, pause screen (resume / volume / menu / quit).
 - Settings: graphics rows, **audio sliders** (master / music / effects), controls help.
-- Keyboard keys can be rebound on the Controls screen. Missing: controller rebinding, in-match name bars and key prompts matched to the retail HUD.
+- Keyboard keys and gamepad buttons can be rebound on the Controls screen. Missing: in-match name bars and key prompts matched to the retail HUD.
 
 ## 8. Audio
 

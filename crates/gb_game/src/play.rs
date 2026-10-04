@@ -808,19 +808,8 @@ fn pad_raw(g: &Gamepad) -> Raw {
     if h.abs() < 0.15 && v.abs() < 0.15 {
         (h, v) = (0.0, 0.0);
     }
-    let p = |b: GamepadButton| g.pressed(b);
-    Raw {
-        h,
-        v,
-        buttons: [
-            p(GamepadButton::South),
-            p(GamepadButton::East),
-            p(GamepadButton::West),
-            p(GamepadButton::North),
-            p(GamepadButton::LeftTrigger),
-            p(GamepadButton::RightTrigger),
-        ],
-    }
+    let bound = crate::binds::pad_get();
+    Raw { h, v, buttons: std::array::from_fn(|i| g.pressed(bound[i])) }
 }
 
 /// `GB_RAGDOLL_DEBUG=1`: report collider pairs whose world AABBs overlap (penetration) with the
