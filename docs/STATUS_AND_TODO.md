@@ -62,6 +62,7 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
   `GB_RING_*`, `GB_INC_*`, `GB_SUBWAY_EV`), not matched against real captures.
 - [~] Water: contact foam where hulls, ice and buoys meet the surface (depth prepass, `GB_NO_WATER_DEPTH=1` disables). Missing: depth-based colour fade, refraction. Sea LOD tile seams show as thin dark lines at the horizon.
 - [ ] Shadowmask / directional lightmaps / light-probe parity, SSAO and shadow softness parity.
+- [x] Grind pipes: the duplicate `(1)` pipe copies (z-fighting stripes) and the black Void submesh over the pipes are no longer drawn.
 - [ ] Particles, glass and fog cards; Incinerator fire is an emissive stand-in.
 - [~] Alley: the daytime sky dome is skipped (black backdrop) so the gaps around the court are not blue; the missing front wall is still absent.
 - [x] Baked lightmaps now actually light vinyl surfaces: updating `lightmap_exposure` on an existing material asset never reached the GPU (exposure 0 = black walls, hence the dark / grey stages and the flaky Grind). The exposure is now written when the vinyl material is created (`vinyl::LightmapExposure`). `GB_LIGHTMAP_STAGE_SCALE` (default 0.25) tunes it; `GB_LM_DEBUG=1` prints lightmap stats.

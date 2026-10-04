@@ -1852,6 +1852,8 @@ fn map_nodes(
     mut clear: ResMut<ClearColor>,
     mut mesh_materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    names: Query<&Name>,
+    parents: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     for (root, scene) in &roots {
@@ -1863,6 +1865,19 @@ fn map_nodes(
             continue;
         }
         for e in children.iter_descendants(root) {
+            // Grind carries a second copy of each pipe group (`grind_pipesLeft (1)` ...) on top of the first: the two
+            // coplanar copies z-fight (shimmering stripes on the pipes), so only the first is drawn.
+            if meshes.contains(e) {
+                let mut cur = Some(e);
+                for _ in 0..4 {
+                    let Some(c) = cur else { break };
+                    if names.get(c).is_ok_and(|n| matches!(n.as_str(), "grind_pipesLeft (1)" | "grind_pipesRight (1)")) {
+                        commands.entity(e).insert(Visibility::Hidden);
+                        break;
+                    }
+                    cur = parents.get(c).ok().map(ChildOf::parent);
+                }
+            }
             if meshes.contains(e) {
                 // Bones leave the bind-pose bounds as the ragdoll moves.
                 commands
@@ -1892,7 +1907,24 @@ fn map_nodes(
                     // SolidVoid is the stage's dark backdrop: where it is hidden the camera sees the
                     // clear colour, so make that the void's black instead of the daytime sky.
                     let is_void = material_names.get(e).is_ok_and(|n| n.0.to_ascii_lowercase().contains("void"));
-                    if is_void && std::env::var_os("GB_HIDE_VOID").is_none() {
+                    // Grind's pipe meshes carry a second `Void` submesh over the same pipe surface: drawn black it z-fights
+                    // the red pipe (flicker, patchy shading), so it is simply not drawn.
+                    let pipe_void = is_void && {
+                        let mut cur = Some(e);
+                        let mut found = false;
+                        for _ in 0..4 {
+                            let Some(c) = cur else { break };
+                            if names.get(c).is_ok_and(|n| n.as_str().starts_with("grind_pipes")) {
+                                found = true;
+                                break;
+                            }
+                            cur = parents.get(c).ok().map(ChildOf::parent);
+                        }
+                        found
+                    };
+                    if pipe_void {
+                        commands.entity(e).insert(Visibility::Hidden);
+                    } else if is_void && std::env::var_os("GB_HIDE_VOID").is_none() {
                         // Draw the backdrop as the flat black GangBeasts/Effects/SolidVoid fill
                         // (single sided, so a camera inside the box sees through it).
                         clear.0 = Color::BLACK;
