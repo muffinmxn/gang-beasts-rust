@@ -1552,7 +1552,7 @@ fn simulate(
         // Debug: GB_GRAB_TEST=1 stands actor 1 in front of actor 0 at step 100 so a scripted grab / lift can be checked.
         if std::env::var_os("GB_GRAB_TEST").is_some() && sim.world.steps == 100 && sim.actors.len() > 1 {
             let mut at = sim.actor_spawn[0];
-            at.position += at.rotation * Vec3::new(0.0, 0.0, 0.9);
+            at.position += at.rotation * Vec3::new(0.0, 0.0, 1.3);
             sim.actor_spawn[1] = at;
             sim.respawn(1);
         }
