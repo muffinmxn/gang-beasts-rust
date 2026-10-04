@@ -109,19 +109,22 @@ tools/harness    optional screenshot / comparison helpers
   sharks (hunt, breach, carry, take damage), trawler capsize, train landslide, gondola cables that snap, buoyant ice and
   buoys on Gerstner sea waves.
 - Lobby (mode / stage / wins / AI / colour, remembered between runs), pause screen, round flow with coinboard, settings for
-  graphics and audio.
+  graphics, audio and rebindable keyboard controls.
+- Baked lightmaps, depth-based shoreline foam on the sea, swimming along the stick, soccer bots that score, per-stage
+  camera framing taken from the game's camera markers.
 - Sound: menu clicks, music, stage ambience, object impacts from each stage's own audio data, punches, footsteps by
   surface, voices, KO and round stingers (needs the optional audio extraction below).
 
 **What is missing** (details and file pointers in [`docs/STATUS_AND_TODO.md`](docs/STATUS_AND_TODO.md))
 
-- Birds on Rooftop / Crane, the train steering along curved track, the Ring's special object set.
+- Birds on Rooftop / Crane, the train steering and yawing along curved track.
 - King of the Hill, Capture the Flag, Big Fight and any online play.
-- Per-item colours and voices in the costume editor, animation clips / emotes, swimming and diving moves.
-- Exact per-stage lighting and colour parity (Subway, Incinerator and Ring are hand tuned), water depth fade and foam at
-  shorelines, particles.
+- Per-item colours and voices in the costume editor, animation clips / emotes, dive / backflip / double-jump moves and
+  the swimming stroke animation.
+- Exact per-stage lighting and colour parity (compare each stage with a retail capture), water depth colour fade and
+  refraction, particles.
 - In-match HUD parity (name bars, key prompts), controller rebinding, progression and unlockables.
-- Audio polish: 3D positioned ambience, mixer snapshots, many stage-specific loops.
+- Audio polish: moving emitters, mixer snapshots, many stage-specific loops.
 
 The full, detailed feature list with every known bug is in [`docs/FEATURES.md`](docs/FEATURES.md); the working to-do list for
 contributors is [`docs/STATUS_AND_TODO.md`](docs/STATUS_AND_TODO.md).
