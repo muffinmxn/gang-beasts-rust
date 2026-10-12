@@ -938,6 +938,14 @@ fn auto_raw(sim: &Sim) -> Option<Raw> {
             "duck" => raw.buttons[1] = true,
             "kick" => raw.buttons[2] = cycle,
             "lift" => raw.buttons[3] = true,
+            // Run (jump held) for 1.8 s, then duck: the running dive.
+            "dive" => {
+                if (sim.world.steps % 150) < 90 {
+                    raw.buttons[0] = true;
+                } else {
+                    raw.buttons[1] = true;
+                }
+            }
             "grab" => {
                 raw.buttons[4] = true;
                 raw.buttons[5] = true;

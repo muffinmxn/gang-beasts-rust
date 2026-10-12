@@ -77,7 +77,8 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 - [ ] Costume physics (dangling parts), animation clips / emotes.
 - [x] Swimming: `SwimCheck` (over five of seven lower-body parts under the surface) puts the beast in the Swim state; the game's four-step stroke cycle (`Swim`, `SwimCyclePoseBody/Arm/Leg`) drives it. `GB_SWIM_TEST=x,z` drops actor 0 into the sea for a check.
 - [x] `SegmentSuppressor`: beast parts flung faster than 100 m/s are damped 15% per step.
-- [ ] Dive, backflip, headbutt, elbow.
+- [x] Running dive (run, then duck or kick): Jump state with the game's upward kick and the drop-kick posture.
+- [ ] Backflip, ledge double jump, emotes.
 
 ## UI / HUD / meta
 

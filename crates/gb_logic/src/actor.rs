@@ -1693,7 +1693,7 @@ impl Actor {
         if c.duck {
             let dive = c.run && c.can_dive && 0.8 <= c.run_timer;
             if dive {
-                // Diving (run + duck): Jump state with dive forces, not ported yet.
+                self.dive(w);
                 return;
             }
             // Crouch walk ("scoot").
@@ -1718,7 +1718,8 @@ impl Actor {
         }
         if c.kick_duck {
             if c.run && c.can_dive && 0.8 <= c.run_timer {
-                return; // kick-duck dive: not ported yet
+                self.dive(w);
+                return;
             }
             // Lying down (Kick held).
             self.applyed_force = 0.5;
@@ -1835,10 +1836,8 @@ impl Actor {
             4.0,
         );
         self.align(w, Part::Head, self.up(w, Part::Head), Vec3::Y, 4.0);
-        if c.duck {
-            return; // dive: not ported yet
-        }
-        if c.kick_duck || c.back_flip {
+        // Jump's duck / kick-duck / backflip share one branch (the dive and the drop kick).
+        if c.duck || c.kick_duck || c.back_flip {
             // Drop kick (Kick held in the air) / backflip (long Kick release in the air).
             if !c.run {
                 for p in [Part::Chest, Part::Waist, Part::Hips] {
@@ -2209,6 +2208,20 @@ impl Actor {
     }
 
     /// Unconscious (0x4593D0): limp; every part stops dealing special hits.
+    /// RunCyclePoseBody dive entry (run + duck or kick held after a 0.8 s run): leave the ground in the Jump state with
+    /// an upward kick (40 * 1.5 / 3 velocity change) on the chest, waist and hips; the Jump state's duck branch then
+    /// throws the body along the slide direction.
+    fn dive(&mut self, w: &mut World) {
+        self.state = JUMP;
+        self.control.jump = true;
+        self.control.can_dive = false;
+        self.control.ground_check_delay = 0.2;
+        let up = Vec3::Y * (40.0 * 1.5 / 3.0);
+        for p in [Part::Chest, Part::Waist, Part::Hips] {
+            self.force(w, p, up);
+        }
+    }
+
     /// ControlHandeler_Human.SwimCheck (0x465800): in the water when more than five of the seven lower-body parts
     /// (legs, thighs, hips, waist, chest) sit in a liquid. Skipped while on the ground; `swimCheckDelay` blocks it.
     fn swim_check(&mut self, w: &World) {
