@@ -79,7 +79,8 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
 - [x] `SegmentSuppressor`: beast parts flung faster than 100 m/s are damped 15% per step.
 - [x] Running dive (run, then duck or kick): Jump state with the game's upward kick and the drop-kick posture.
 - [x] Ledge grab-jump: releasing Jump while hanging lets go and jumps (ClimbCheck DoubleJump). Backflip was already in.
-- [ ] Emotes.
+- [x] The head looks at the targeted collider while fighting (DirectionCheck upperIntrest).
+- [ ] Emotes. Moving-platform push (RunCycleRotateBall) is skipped: no exported stage marks a collider as a moving platform.
 
 ## UI / HUD / meta
 
