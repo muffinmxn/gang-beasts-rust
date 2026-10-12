@@ -686,7 +686,7 @@ impl Actor {
         }
         if !self.control.on_ground {
             if self.control.left_can_climb || self.control.right_can_climb {
-                self.climb_check(i);
+                self.climb_check(w, i);
                 return;
             }
             if self.control.in_water {
@@ -877,8 +877,9 @@ impl Actor {
         }
     }
 
-    /// ControlHandeler_Human.ClimbCheck (0x45FE90); DoubleJump (grab-jump off a ledge) not ported.
-    fn climb_check(&mut self, i: &InputState) {
+    /// ControlHandeler_Human.ClimbCheck (0x45FE90). Releasing Jump while hanging (the "DoubleJump" action, bound to the
+    /// same button) lets go of both grabs and jumps off the ledge (grabJump).
+    fn climb_check(&mut self, w: &mut World, i: &InputState) {
         let (lg, rg) = self.grabbing();
         let c = &mut self.control;
         if !lg && c.left_can_climb {
@@ -889,7 +890,14 @@ impl Actor {
         }
         if (lg && c.left_can_climb) || (rg && c.right_can_climb) {
             c.lift_self = i.digital(input::JUMP);
-            self.state = CLIMB;
+            if i.just_up(input::JUMP) {
+                c.grab_delay = 0.4;
+                self.reset_grabs(w);
+                self.control.grab_jump = true;
+                self.state = JUMP;
+            } else {
+                self.state = CLIMB;
+            }
         }
     }
 
