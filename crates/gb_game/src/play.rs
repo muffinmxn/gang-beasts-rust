@@ -1556,6 +1556,23 @@ fn simulate(
             sim.actor_spawn[1] = at;
             sim.respawn(1);
         }
+        // Debug: GB_SWIM_TEST=x,z drops actor 0 at its spawn offset by (x, z) at step 100 (into the sea) and logs its
+        // state and hips every second.
+        if let Some(off) = std::env::var("GB_SWIM_TEST").ok().and_then(|v| {
+            let f: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            (f.len() == 2).then(|| Vec3::new(f[0], 0.0, f[1]))
+        }) {
+            if sim.world.steps == 100 {
+                let mut at = sim.actor_spawn[0];
+                at.position += off;
+                sim.actor_spawn[0] = at;
+                sim.respawn(0);
+            }
+            if sim.world.steps % 50 == 0 {
+                let p = sim.world.pose(sim.actors[0].beast.body(Part::Hips)).position;
+                info!("swim test step {} state {} water {:?} hips {:.2} {:.2} {:.2}", sim.world.steps, sim.actors[0].state, sim.actors[0].water_level, p.x, p.y, p.z);
+            }
+        }
         // Scripted input for captures (see auto_raw): the keyboard actor walks/punches on a
         // fixed cycle, so a snag can be reproduced without a human at the keyboard.
         if let Some(raw) = auto_raw(sim) {
@@ -1606,6 +1623,17 @@ fn simulate(
         actor.fixed_update(&mut sim.world, input);
     }
     sim.world.step();
+    // SegmentSuppressor.UpdateImpl (every beast part, VelocityMagnitudeThreshold 100): a body part flung faster than
+    // 100 m/s (a solver explosion) has its velocity damped by 15% each update.
+    for k in 0..sim.actors.len() {
+        for p in Part::ALL {
+            let b = sim.actors[k].beast.body(p);
+            let v = sim.world.linear_velocity(b);
+            if v.length_squared() > 100.0 * 100.0 {
+                sim.world.set_linear_velocity(b, v * 0.85);
+            }
+        }
+    }
     sounds::contact_sounds(sim, &mut sound_state, &mut sfx, &lib);
     sounds::round_sounds(sim, &mut sound_state, &mut sfx, &lib);
     sounds::trigger_sounds(sim, &mut sound_state, &mut sfx, &lib);

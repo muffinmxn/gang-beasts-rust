@@ -75,7 +75,9 @@ breach, carry, damage), trawler capsize, train landslide and scrolling track, go
   "Custom" preset and carried into matches. Missing: per-item colours,
   voice / face expressions, unlock rules.
 - [ ] Costume physics (dangling parts), animation clips / emotes.
-- [~] Swimming: beasts in water float and are pushed along the stick (no stroke pose cycle). Missing: dive, backflip, double jump, headbutt, elbow.
+- [x] Swimming: `SwimCheck` (over five of seven lower-body parts under the surface) puts the beast in the Swim state; the game's four-step stroke cycle (`Swim`, `SwimCyclePoseBody/Arm/Leg`) drives it. `GB_SWIM_TEST=x,z` drops actor 0 into the sea for a check.
+- [x] `SegmentSuppressor`: beast parts flung faster than 100 m/s are damped 15% per step.
+- [ ] Dive, backflip, headbutt, elbow.
 
 ## UI / HUD / meta
 

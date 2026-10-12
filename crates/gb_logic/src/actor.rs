@@ -261,6 +261,13 @@ pub struct Movement {
     pub left_arm_pose: i32,
     pub right_arm_pose: i32,
     pub run_force: f32,
+    /// Swim stroke cycle (MovementHandeler_HumanoidMediumEctomorph swim* fields).
+    pub swim_cycle_timer: f32,
+    pub swim_cycle_speed: f32,
+    pub swim_left_leg_pose: i32,
+    pub swim_right_leg_pose: i32,
+    pub swim_left_arm_pose: i32,
+    pub swim_right_arm_pose: i32,
 }
 
 impl Default for Movement {
@@ -277,6 +284,12 @@ impl Default for Movement {
             left_arm_pose: 0,
             right_arm_pose: 2,
             run_force: 0.0,
+            swim_cycle_timer: 0.0,
+            swim_cycle_speed: 0.15,
+            swim_left_leg_pose: 2,
+            swim_right_leg_pose: 0,
+            swim_left_arm_pose: 0,
+            swim_right_arm_pose: 2,
         }
     }
 }
@@ -412,6 +425,9 @@ impl PunchTarget {
 
 pub struct Actor {
     pub beast: Beast,
+    /// Water surface height under the beast (set by the stage each step; None = no water). Stands in for each body
+    /// part's `SimpleBuoyancyCollider._currentLiquid`.
+    pub water_level: Option<f32>,
     pub state: u32,
     pub last_state: u32,
     pub applyed_force: f32,
@@ -466,6 +482,7 @@ impl Actor {
             time_since_target: 0.0,
             parts,
             rng: Random(seed.max(1)),
+            water_level: None,
             dt: world.settings.fixed_timestep,
         }
     }
@@ -627,7 +644,8 @@ impl Actor {
             // Not ported yet: the ragdoll goes limp in these states.
             UNCONSCIOUS => self.unconscious(),
             CLIMB => self.climb(w),
-            DEAD | SWIM | DRIVE => {}
+            SWIM => self.swim(w),
+            DEAD | DRIVE => {}
             _ => {}
         }
         self.last_state = self.state;
@@ -657,7 +675,7 @@ impl Actor {
         }
         self.direction_check(i);
         self.ground_check();
-        // SwimCheck, LiftCheck: not ported yet.
+        self.swim_check(w);
         self.punch_grab_check(w, i);
         self.kick_stomp_check(w, i);
         self.duck_check(w, i);
@@ -672,6 +690,8 @@ impl Actor {
                 return;
             }
             if self.control.in_water {
+                // ControlHandeler.GetInput: in the water and off the ground -> Swim.
+                self.state = SWIM;
                 return;
             }
         } else {
@@ -2189,6 +2209,151 @@ impl Actor {
     }
 
     /// Unconscious (0x4593D0): limp; every part stops dealing special hits.
+    /// ControlHandeler_Human.SwimCheck (0x465800): in the water when more than five of the seven lower-body parts
+    /// (legs, thighs, hips, waist, chest) sit in a liquid. Skipped while on the ground; `swimCheckDelay` blocks it.
+    fn swim_check(&mut self, w: &World) {
+        let dt = self.dt;
+        let c = &mut self.control;
+        if c.swim_check_delay > 0.0 {
+            c.in_water = false;
+            c.swim_check_delay -= dt;
+            return;
+        }
+        if c.on_ground {
+            return;
+        }
+        let Some(level) = self.water_level else {
+            c.in_water = false;
+            return;
+        };
+        let parts = [
+            Part::LeftLeg,
+            Part::LeftThigh,
+            Part::RightLeg,
+            Part::RightThigh,
+            Part::Hips,
+            Part::Waist,
+            Part::Chest,
+        ];
+        let wet = parts.iter().filter(|p| w.pose(self.beast.body(**p)).position.y < level).count();
+        self.control.in_water = wet > 5;
+    }
+
+    /// MovementHandeler_HumanoidMediumEctomorph.Swim (0x4575F0): a four-step stroke cycle (0.15 s per step) for the
+    /// body, both arms and both legs.
+    fn swim(&mut self, w: &mut World) {
+        let first = self.rng.range_i(1, 3) == 1;
+        let dt = self.dt;
+        let m = &mut self.movement;
+        m.swim_cycle_speed = 0.15;
+        if m.state_change {
+            let (la, ra, ll, rl) = if first { (2, 0, 0, 2) } else { (0, 2, 2, 0) };
+            m.swim_left_arm_pose = la;
+            m.swim_right_arm_pose = ra;
+            m.swim_left_leg_pose = ll;
+            m.swim_right_leg_pose = rl;
+            m.state_change = false;
+        }
+        if m.swim_cycle_timer < m.swim_cycle_speed {
+            m.swim_cycle_timer += dt;
+        } else {
+            m.swim_cycle_timer = 0.0;
+            let step = |p: i32| if p - 1 < 0 { 3 } else { p - 1 };
+            m.swim_left_arm_pose = step(m.swim_left_arm_pose);
+            m.swim_right_arm_pose = step(m.swim_right_arm_pose);
+            m.swim_left_leg_pose = step(m.swim_left_leg_pose);
+            m.swim_right_leg_pose = step(m.swim_right_leg_pose);
+        }
+        let (la, ra, ll, rl) = (
+            m.swim_left_arm_pose,
+            m.swim_right_arm_pose,
+            m.swim_left_leg_pose,
+            m.swim_right_leg_pose,
+        );
+        self.swim_cycle_pose_body(w);
+        if !self.control.left_arm_override {
+            self.swim_cycle_pose_arm(w, 0, la);
+        }
+        if !self.control.right_arm_override {
+            self.swim_cycle_pose_arm(w, 1, ra);
+        }
+        if !self.control.left_leg_override {
+            self.swim_cycle_pose_leg(w, 0, ll);
+        }
+        if !self.control.right_leg_override {
+            self.swim_cycle_pose_leg(w, 1, rl);
+        }
+    }
+
+    /// SwimCyclePoseBody (0x4578D0): treading water upright with no input; with input the chest is lifted and the hips
+    /// pushed down and back so the body lies along the stroke, chest and hips turned toward the direction.
+    fn swim_cycle_pose_body(&mut self, w: &mut World) {
+        let c = self.control.clone();
+        let moving = c.raw_direction.x != 0.0 || c.raw_direction.z != 0.0;
+        if !moving {
+            self.force(w, Part::Chest, Vec3::Y * 2.0);
+            self.force(w, Part::Hips, Vec3::NEG_Y * 2.0);
+            self.align(w, Part::Head, self.forward(w, Part::Head), c.look_direction, 2.5);
+            self.align(w, Part::Head, self.up(w, Part::Head), Vec3::Y, 2.5);
+            self.align(w, Part::Chest, self.forward(w, Part::Chest), c.direction, 10.0);
+            self.align(w, Part::Waist, self.forward(w, Part::Waist), c.direction, 10.0);
+            self.align(w, Part::Hips, self.forward(w, Part::Hips), c.direction, 10.0);
+        } else {
+            self.force(w, Part::Chest, Vec3::Y * 5.0);
+            self.force(w, Part::Hips, Vec3::NEG_Y * 5.0);
+            self.force(w, Part::Chest, c.direction);
+            self.force(w, Part::Hips, -c.direction * 0.5);
+            self.align(w, Part::Head, self.forward(w, Part::Head), c.look_direction, 2.5);
+            self.align(w, Part::Head, self.up(w, Part::Head), Vec3::Y, 2.5);
+            self.align(w, Part::Chest, self.up(w, Part::Chest), c.direction, 10.0);
+            self.align(w, Part::Waist, self.up(w, Part::Waist), c.direction, 10.0);
+            self.align(w, Part::Hips, self.up(w, Part::Hips), c.direction, 10.0);
+        }
+    }
+
+    /// SwimCyclePoseArm (0x458510): arm and forearm `up` axes steered per stroke pose, relative to the chest (side
+    /// vector `s` = chest right for the left arm, chest left for the right arm).
+    fn swim_cycle_pose_arm(&mut self, w: &mut World, side: usize, pose: i32) {
+        let (arm, forearm, _) = Self::arm_parts(side);
+        let right = w.pose(self.body(Part::Chest)).rotation * Vec3::X;
+        let s = if side == 0 { right } else { -right };
+        let fwd = self.forward(w, Part::Chest);
+        let up = self.up(w, Part::Chest);
+        let d = self.control.direction;
+        let moving = self.control.raw_direction.x != 0.0 || self.control.raw_direction.z != 0.0;
+        let (a, f) = if !moving {
+            match pose {
+                0 => (s, s),
+                1 => (d, -s),
+                2 => (s, -s),
+                _ => (-d, -d),
+            }
+        } else {
+            match pose {
+                0 => (-fwd, -s - fwd),
+                1 => (-up, s - up),
+                2 => (fwd, fwd),
+                _ => (up, up),
+            }
+        };
+        self.align(w, arm, self.up(w, arm), a, 5.0);
+        self.align(w, forearm, self.up(w, forearm), f, 5.0);
+    }
+
+    /// SwimCyclePoseLeg (0x459020): a kick cycle on the lower leg.
+    fn swim_cycle_pose_leg(&mut self, w: &mut World, side: usize, pose: i32) {
+        let leg = if side == 0 { Part::LeftLeg } else { Part::RightLeg };
+        let up = self.up(w, leg);
+        let d = self.control.direction;
+        let (alignment, target) = match pose {
+            0 => (up, d),
+            1 => (-up, d),
+            2 => (up, Vec3::Y),
+            _ => (-up, -d),
+        };
+        self.align(w, leg, alignment, target, 4.0);
+    }
+
     fn unconscious(&mut self) {
         if self.movement.state_change {
             self.interact = [1; 21];

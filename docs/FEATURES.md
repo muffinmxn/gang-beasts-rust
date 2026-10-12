@@ -15,7 +15,8 @@ Legend: **Done** = matches the game's logic as far as we can tell, **Approx** = 
 | Scene import | Done | rigidbodies, box/sphere/capsule/convex/mesh colliders, ConfigurableJoints (Unity basis fix), CCD modes, kinematic movers |
 | Beast ragdoll | Done | `gb_logic`: stand / walk / run / jump / fall / climb states, grab (left/right, lift), punch, kick, duck/headbutt, damage and knockout |
 | Beast variants | Done | Normal, **Big** (1.2 scale, heavier) and **Tiny** prefabs, each with their own sidecar and AI profile |
-| Swimming / diving / backflip / double jump | Missing | beasts in water are floated by a spring-and-drag helper |
+| Swimming | Done | `SwimCheck` + the Swim state stroke cycle (body, arms, legs) from the game; floating still uses a spring-and-drag helper |
+| Diving / backflip / double jump | Missing | |
 | Unity's 0.04 s max timestep clamp | Missing | would make slow debug builds run in slow motion |
 
 ## 2. Modes and rounds
