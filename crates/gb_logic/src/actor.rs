@@ -673,7 +673,7 @@ impl Actor {
             self.revive_check(i);
             return;
         }
-        self.direction_check(i);
+        self.direction_check(w, i);
         self.ground_check();
         self.swim_check(w);
         self.punch_grab_check(w, i);
@@ -702,9 +702,8 @@ impl Actor {
         self.jump_run_check(i);
     }
 
-    /// ControlHandeler_Human.DirectionCheck (0x460150); target interest (lookDirection toward a
-    /// targeted collider) is not ported yet.
-    fn direction_check(&mut self, i: &InputState) {
+    /// ControlHandeler_Human.DirectionCheck (0x460150).
+    fn direction_check(&mut self, w: &World, i: &InputState) {
         let c = &mut self.control;
         c.raw_direction = Vec3::ZERO;
         let h = i.analogue(input::HORIZONTAL);
@@ -724,6 +723,16 @@ impl Actor {
         if self.state == IDLE {
             return;
         }
+        // A targeted collider (TargetingHandeler.upperIntrest) draws the head: look from the head to its closest point.
+        if let Some(target) = self.upper_interest {
+            let head = w.pose(self.beast.body(Part::Head)).position;
+            let look = w.closest_point(target, head) - head;
+            if look.is_finite() && look.length_squared() > 1e-6 {
+                self.control.look_direction = look;
+                return;
+            }
+        }
+        let c = &mut self.control;
         c.look_direction = c.direction + Vec3::new(0.0, 0.2, 0.0);
     }
 
